@@ -237,41 +237,108 @@ ${historyContext}
 // Função auxiliar para buscar técnicas do servidor RAG
 
 
-// === 1. CO-PILOTO (PBT & EVIDÊNCIAS) ===
+// === 1. CO-PILOTO "VISÃO DE REDE" (PBT + Socrático + Metáforas) ===
 export const getCoPilotSuggestion = async (input: string, context: string, patient: any) => {
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.VITE_API_KEY;
   if (!apiKey) throw new Error("Chave API não encontrada.");
 
   const ai = new GoogleGenAI({ apiKey });
 
+  // 1. AQUI ELE PEGA A IDENTIDADE PARA A METÁFORA
+  const identity = patient?.occupation || patient?.profisao || "a vida cotidiana";
+
   const prompt = `
-ATUE COMO: Supervisor Clínico em PBT (Process-Based Therapy) e PBE.
-PACIENTE: ${patient?.name || 'Paciente'}
-CONTEXTO ATUAL: ${context}
-FALA/RELATO RECENTE: "${input}"
+ATUE COMO: Supervisor Clínico em PBT (Terapia Baseada em Processos).
+MENTALIDADE: Sistêmica, Socrática e Criativa.
 
-MISSÃO:
-Não apenas converse. Identifique quaiquer PROCESSOS DISFUNCIONAIS ativos neste momento (ex: Fusão Cognitiva, Evitação Experiencial, Falta de Clareza de Valores, Rito Rígido).
+DADOS DO PACIENTE:
+- Identidade: ${identity}
+- Contexto: ${context}
+FALA ATUAL: "${input}"
 
-TAREFA:
-1. Identifique o processo-alvo principal na fala.
-2. Sugira UMA intervenção prática e imediata baseada em abordagens como TCC, ACT ou DBT.
-3. Se houver risco de vida, alerte imediatamente com **RISCO**.
+SUA ANÁLISE INTERNA (O "SCAN" DA REDE PBT):
+Não olhe o sintoma isolado. Visualize a REDE DE PROCESSOS.
+1. Quais "Nós" acenderam? (Afeto, Cognição, Atenção, Self).
+2. Qual conexão está rígida? (Ex: "Sinto Ansiedade" -> "Devo Evitar").
 
-Responda de forma direta e concisa (máx 3 frases).
+SUA MISSÃO (A Intervenção Cirúrgica):
+Gere UMA fala curta (máx 3 linhas) escolhendo a melhor estratégia:
+
+OPÇÃO A: 🕸️ QUESTIONAMENTO SOCRÁTICO (Descoberta Guiada):
+   - Faça a pergunta que mostre como um nó puxa o outro.
+   - Ex: "Você percebe como o nó do 'Medo' ativa automaticamente o 'Ficar em casa'? O que aconteceria se a gente só observasse essa conexão?"
+
+OPÇÃO B: 🎭 METÁFORA DE IDENTIDADE (Insight Rápido):
+   - Use a profissão dele (${identity}) para explicar o sistema travado.
+   - Ex (Se Engenheiro): "Parece que o 'sistema de segurança' (Ansiedade) disparou o alarme sem ter fogo."
+
+OPÇÃO C: ⚡ INTERVENÇÃO DE PROCESSO (Defusão/Aceitação):
+   - Sugira algo prático para flexibilizar a rede.
+   - Ex: "Vamos tentar apenas notar esse pensamento como um evento passageiro, sem comprar ele?"
+
+RESPOSTA (Direta para o terapeuta):
 `;
 
   try {
     const result = await ai.models.generateContent({
-      model: RATES.FAST,
+      model: RATES.FAST, // Usa o modelo rápido (Flash)
       contents: [{ role: "user", parts: [{ text: prompt }] }],
-      config: { temperature: 0.3 }
+      config: { temperature: 0.5 } // Temperatura média para criatividade na metáfora
     });
 
     return result.text || "Sugestão indisponível.";
   } catch (e) {
     console.error("CoPilot Error:", e);
     return "Sugestão indisponível.";
+  }
+};
+
+// === 6. CONSULTOR DE BIBLIOTECA (Lê o PDF Físico) ===
+export const consultCoreLibrary = async (
+  context: string,
+  fileName: string = "core/Questionamento_Socrático_para_Terapeutas_Aprenda_a_Pensar_e_a_Intervir.pdf"
+) => {
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.VITE_API_KEY;
+  if (!apiKey) throw new Error("Chave API não encontrada.");
+
+  const ai = new GoogleGenAI({ apiKey });
+
+  try {
+    const response = await fetch(`/library/${fileName}`);
+    if (!response.ok) throw new Error(`Arquivo ${fileName} não encontrado.`);
+
+    const blob = await response.blob();
+    const base64 = await new Promise<string>((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const result = reader.result as string;
+        resolve(result.includes('base64,') ? result.split('base64,')[1] : result);
+      };
+      reader.readAsDataURL(blob);
+    });
+
+    const prompt = `
+    ATUE COMO: Bibliotecário Clínico Socrático.
+    CONTEXTO DA SESSÃO: ${context}
+    FONTE: Manual de Questionamento Socrático em anexo.
+    
+    TAREFA: 
+    Busque no manual uma técnica de questionamento ou um roteiro de perguntas específico que se aplique AGORA a este contexto.
+    Não invente. Cite a técnica do livro e sugira como aplicar.
+    `;
+
+    const result = await ai.models.generateContent({
+      model: RATES.DEEP,
+      contents: [
+        { role: "user", parts: [{ text: prompt }, { inlineData: { data: base64, mimeType: "application/pdf" } }] }
+      ],
+      config: { temperature: 0.1 }
+    });
+
+    return result.text;
+  } catch (e) {
+    console.error("Library Consult Error:", e);
+    return "Erro ao ler manual.";
   }
 };
 

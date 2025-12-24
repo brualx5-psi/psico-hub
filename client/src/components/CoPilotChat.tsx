@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Zap, Save, Loader2, Bot, User, FileText, RefreshCw, Mic, MicOff, Calendar, ListChecks, AlertTriangle } from 'lucide-react';
-import { getCoPilotSuggestion, summarizeChatToSoap, generateSessionScript } from '../lib/gemini';
+import { Send, Zap, Save, Loader2, Bot, User, FileText, RefreshCw, Mic, MicOff, Calendar, ListChecks, AlertTriangle, Book } from 'lucide-react';
+import { getCoPilotSuggestion, summarizeChatToSoap, generateSessionScript, consultCoreLibrary } from '../lib/gemini';
 import { generateSOAPPreview } from '../lib/soap-preview';
 import { usePatients } from '../context/PatientContext';
 
@@ -36,6 +36,9 @@ export const CoPilotChat: React.FC<CoPilotChatProps> = ({ onSessionEnd }) => {
     const [isCrisisMode, setIsCrisisMode] = useState(false);
     const [isGeneratingScript, setIsGeneratingScript] = useState(false);
 
+    // Library Consultant
+    const [isConsultingLibrary, setIsConsultingLibrary] = useState(false);
+
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const recognitionRef = useRef<any>(null);
     const autoSendTimerRef = useRef<any>(null);
@@ -45,6 +48,34 @@ export const CoPilotChat: React.FC<CoPilotChatProps> = ({ onSessionEnd }) => {
     };
 
     useEffect(scrollToBottom, [messages]);
+
+    // ... (rest of useEffects)
+
+    const handleConsultLibrary = async () => {
+        if (messages.length === 0) {
+            alert("Comece a sessão ou digite algo para dar contexto ao bibliotecário.");
+            return;
+        }
+
+        setIsConsultingLibrary(true);
+        try {
+            // Build context from last messages
+            const context = messages.slice(-3).map(m => `${m.role === 'user' ? 'Terapeuta' : 'Supervisor'}: ${m.text}`).join('\n');
+            const suggestion = await consultCoreLibrary(context);
+
+            const libraryMsg: Message = {
+                id: crypto.randomUUID(),
+                role: 'ai',
+                text: `📚 **CONSULTA AO MANUAL SOCRÁTICO:**\n\n${suggestion}`,
+                timestamp: new Date()
+            };
+            setMessages(prev => [...prev, libraryMsg]);
+        } catch (error) {
+            console.error("Erro na consulta:", error);
+        } finally {
+            setIsConsultingLibrary(false);
+        }
+    };
 
     // Web Speech API setup
     useEffect(() => {
@@ -359,18 +390,30 @@ export const CoPilotChat: React.FC<CoPilotChatProps> = ({ onSessionEnd }) => {
                             {isRecording ? 'Gravando' : 'Microfone'}
                         </button>
                         {sessionStartTime && (
-                            <button
-                                onClick={handleCrisisMode}
-                                disabled={isGeneratingScript || isFinalizing}
-                                className={`px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-all shadow-sm ${isCrisisMode
-                                    ? 'bg-red-600 hover:bg-red-500 text-white'
-                                    : 'bg-amber-500 hover:bg-amber-400 text-white'
-                                    }`}
-                                title="Informar situação de crise e recalcular roteiro"
-                            >
-                                <AlertTriangle className="w-4 h-4" />
-                                {isCrisisMode ? 'Em Crise' : 'Mudar Demanda'}
-                            </button>
+                            <>
+                                <button
+                                    onClick={handleCrisisMode}
+                                    disabled={isGeneratingScript || isFinalizing}
+                                    className={`px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-all shadow-sm ${isCrisisMode
+                                        ? 'bg-red-600 hover:bg-red-500 text-white'
+                                        : 'bg-amber-500 hover:bg-amber-400 text-white'
+                                        }`}
+                                    title="Informar situação de crise e recalcular roteiro"
+                                >
+                                    <AlertTriangle className="w-4 h-4" />
+                                    {isCrisisMode ? 'Em Crise' : 'Mudar Demanda'}
+                                </button>
+
+                                <button
+                                    onClick={handleConsultLibrary}
+                                    disabled={isConsultingLibrary || isFinalizing}
+                                    className="px-3 py-2 bg-indigo-500 hover:bg-indigo-400 text-white rounded-lg text-sm font-medium flex items-center gap-2 transition-all shadow-sm"
+                                    title="Consultar Manual Socrático sobre o contexto atual"
+                                >
+                                    {isConsultingLibrary ? <Loader2 className="w-4 h-4 animate-spin" /> : <Book className="w-4 h-4" />}
+                                    Manual Socrático
+                                </button>
+                            </>
                         )}
                         <button
                             onClick={handleFinalizeSession}
