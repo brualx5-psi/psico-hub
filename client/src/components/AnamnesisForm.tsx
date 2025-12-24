@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { usePatients } from '../context/PatientContext';
-import { Save, FileText, Sparkles, Loader2 } from 'lucide-react';
+import { Save, FileText, Sparkles, Loader2, Cloud, CloudOff } from 'lucide-react';
 import { generateInitialFormulation } from '../lib/gemini';
 
 const DEFAULT_TOPICS = [
@@ -158,20 +158,48 @@ export const AnamnesisForm: React.FC = () => {
     const [isSaving, setIsSaving] = useState(false);
     const [isGeneratingFormulation, setIsGeneratingFormulation] = useState(false);
 
+    // Auto-Save States
+    const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+    const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
+
+    // Initial Load
     useEffect(() => {
         if (currentPatient?.clinicalRecords.anamnesis.content) {
             try {
                 const parsed = JSON.parse(currentPatient.clinicalRecords.anamnesis.content);
                 setAnamnesisData(parsed);
-            } catch {
-                // Se não for JSON, trata como texto antigo
-            }
+                setLastSavedAt(new Date(currentPatient.clinicalRecords.anamnesis.updatedAt));
+            } catch { /* Handle legacy text */ }
         }
     }, [currentPatient]);
 
-    const handleSave = () => {
+    // Auto-Save Effect (Debounce 2s)
+    useEffect(() => {
+        if (!hasUnsavedChanges) return;
+
+        const timer = setTimeout(() => {
+            handleSave();
+        }, 2000); // 2 seconds delay
+
+        return () => clearTimeout(timer);
+    }, [anamnesisData, hasUnsavedChanges]);
+
+    // Prevent accidental close
+    useEffect(() => {
+        const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+            if (hasUnsavedChanges) {
+                e.preventDefault();
+                e.returnValue = '';
+            }
+        };
+        window.addEventListener('beforeunload', handleBeforeUnload);
+        return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+    }, [hasUnsavedChanges]);
+
+    const handleSave = async () => {
         if (!currentPatient) return;
         setIsSaving(true);
+        console.log("💾 Auto-saving Anamnesis...");
 
         updatePatient({
             ...currentPatient,
@@ -185,11 +213,17 @@ export const AnamnesisForm: React.FC = () => {
             }
         });
 
-        setTimeout(() => setIsSaving(false), 1000);
+        // Simulate short delay for visual feedback, then reset states
+        setTimeout(() => {
+            setIsSaving(false);
+            setHasUnsavedChanges(false);
+            setLastSavedAt(new Date());
+        }, 800);
     };
 
     const handleTopicChange = (topicId: number, value: string) => {
         setAnamnesisData(prev => ({ ...prev, [topicId]: value }));
+        setHasUnsavedChanges(true); // Flag change
     };
 
     const handleGenerateFormulation = async () => {
@@ -246,7 +280,28 @@ export const AnamnesisForm: React.FC = () => {
                         <FileText className="w-6 h-6 text-indigo-600" />
                         Anamnese Estruturada
                     </h2>
-                    <p className="text-gray-600 text-sm mt-1">Entrevista inicial completa - 14 tópicos</p>
+                    <div className="flex items-center gap-2 mt-1">
+                        <p className="text-gray-600 text-sm">Entrevista inicial completa - 14 tópicos</p>
+                        {/* Auto-Save Indicator */}
+                        <div className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-full transition-colors ${hasUnsavedChanges ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                            {isSaving ? (
+                                <>
+                                    <Loader2 className="w-3 h-3 animate-spin" />
+                                    <span>Salvando...</span>
+                                </>
+                            ) : hasUnsavedChanges ? (
+                                <>
+                                    <CloudOff className="w-3 h-3" />
+                                    <span>Alterações não salvas</span>
+                                </>
+                            ) : (
+                                <>
+                                    <Cloud className="w-3 h-3" />
+                                    <span>Salvo {lastSavedAt ? `às ${lastSavedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}</span>
+                                </>
+                            )}
+                        </div>
+                    </div>
                 </div>
                 <div className="flex gap-3">
                     <button
@@ -260,10 +315,10 @@ export const AnamnesisForm: React.FC = () => {
                     <button
                         onClick={handleSave}
                         disabled={isSaving}
-                        className="flex items-center gap-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white px-6 py-3 rounded-xl font-semibold transition-all shadow-lg disabled:opacity-50"
+                        className={`flex items-center gap-2 px-6 py-3 rounded-xl font-semibold transition-all shadow-lg disabled:opacity-50 ${hasUnsavedChanges ? 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white' : 'bg-gray-200 text-gray-500 cursor-default hover:bg-gray-300'}`}
                     >
                         <Save className="w-4 h-4" />
-                        {isSaving ? 'Salvando...' : 'Salvar Anamnese'}
+                        {isSaving ? 'Salvando...' : hasUnsavedChanges ? 'Salvar Agora' : 'Salvo'}
                     </button>
                 </div>
             </div>

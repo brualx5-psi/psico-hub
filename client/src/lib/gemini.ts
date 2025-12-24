@@ -12,7 +12,7 @@ declare global {
 
 const RATES = {
   FAST: "gemini-2.0-flash-exp",  // Velocidade para Co-Piloto e Chat
-  DEEP: "gemini-pro",             // Raciocínio Profundo para Análise e PBT
+  DEEP: "gemini-pro-latest",             // Raciocínio Profundo para Análise e PBT
 };
 
 const EvidenceSchemaWithSource: Schema = {
@@ -115,7 +115,22 @@ const masterSchema: Schema = {
 
 export const systemInstruction = `
 VOCÊ É: O "Assistente de Prontuário Clínico", um auditor especializado em Prática Baseada em Evidências (PBE).
-SUA MISSÃO: Estruturar dados clínicos brutos em documentos formais, mapear processos PBT e garantir a qualidade técnica do registro.
+SUA MISSÃO: Estruturar dados clínicos brutos em documentos formais, mapear processos PBT e garantira qualidade técnica do registro.
+
+FILOSOFIA DA REDE PBT (HIPÓTESE, NÃO DOGMA):
+- As setas representam HIPÓTESES CLÍNICAS a serem testadas, não leis imutáveis.
+- A rede é dinâmica: deve ser ajustada conforme novos dados surgem (ex: intervenção funcionou? a conexão enfraqueceu?).
+
+ALGORITMO PARA DECIDIR SETAS (USE EM CADA CONEXÃO):
+1. Ordem Temporal: A costuma vir antes de B?
+2. Mecanismo Plausível: Faz sentido funcionalmente A mexer em B?
+3. Feedback: B também volta e mexe em A? Se sim, use Seta Bidirecional (↔).
+   - Simples influência: Use Seta Unidirecional (→).
+
+DEFINIÇÃO DE FORÇA (PESO):
+- Forte (Linha grossa/Ponta grande): Relação CENTRAL para o caso. Influência determinante.
+- Moderada (Padrão): Relação relevante, mas não é o "coração" do problema.
+- Fraca (Linha fina): Influência periférica ou incerta.
 
 REGRAS DE OURO:
 1. LINGUAGEM CLÍNICA: Use termos técnicos adequados (ex: "Paciente refere", "Evidência sugere", "Comportamento de esquiva").
@@ -158,14 +173,14 @@ export const summarizeChatToSoap = async (chatHistory: string) => {
   const ai = new GoogleGenAI({ apiKey: apiKey });
 
   const prompt = `
-  CONTEXTO: O terapeuta realizou uma sessão assistida por chat. Abaixo está o histórico da conversa e anotações rápidas feitas durante o atendimento.
+CONTEXTO: O terapeuta realizou uma sessão assistida por chat.Abaixo está o histórico da conversa e anotações rápidas feitas durante o atendimento.
   
   HISTÓRICO DO CHAT DA SESSÃO:
   ${chatHistory}
-  
-  TAREFA:
+
+TAREFA:
   Transforme esse diálogo fragmentado e anotações rápidas em um REGISTRO S.O.A.P FORMAL e uma ANÁLISE PBT COMPLETA, como se fosse um prontuário oficial feito após a sessão.
-  Ignore comandos técnicos do terapeuta (ex: "analise isso") e foque no conteúdo clínico relatado.
+  Ignore comandos técnicos do terapeuta(ex: "analise isso") e foque no conteúdo clínico relatado.
     `;
 
   try {
@@ -200,7 +215,7 @@ SUA MISSÃO: Responder perguntas do terapeuta cruzando informações de diferent
 Use linguagem formal de prontuário.
 HISTÓRICO DO PACIENTE:
 ${historyContext}
-    `;
+`;
 
   try {
     const result = await ai.models.generateContent({
@@ -220,78 +235,31 @@ ${historyContext}
 };
 
 // Função auxiliar para buscar técnicas do servidor RAG
-const fetchCBTTechniques = async (query: string, context: string, patientDisorder?: string) => {
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 2000); // 2s timeout para não travar
 
-    const response = await fetch('http://localhost:3001/api/search-technique', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        query: `${context}\n${query}`.slice(-500),
-        patientDisorder: patientDisorder || null // Hierarquia: protocol → core
-      }),
-      signal: controller.signal
-    });
 
-    clearTimeout(timeoutId);
-
-    if (!response.ok) return [];
-
-    const data = await response.json();
-    return data.techniques || [];
-  } catch (error) {
-    return [];
-  }
-};
-
-export const getCoPilotSuggestion = async (currentInput: string, context: string, currentPatient?: any) => {
+// === 1. CO-PILOTO (PBT & EVIDÊNCIAS) ===
+export const getCoPilotSuggestion = async (input: string, context: string, patient: any) => {
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.VITE_API_KEY;
-  if (!apiKey) throw new Error("Chave de API não encontrada.");
-
-  // 1. Buscar técnicas (HIERARQUIA: Protocolo → Core)
-  const techniques = await fetchCBTTechniques(currentInput, context, currentPatient?.primaryDisorder);
-
-  const techniquesContext = techniques.length > 0
-    ? `\n📚 LITERATURA BASEADA EM EVIDÊNCIA ENCONTRADA:\n${techniques.map((t: any) => {
-      const sourceLabel = t.source_type === 'protocol' ? '🎯 PROTOCOLO' : '📖 BASE';
-      return `${sourceLabel} [${t.source}]:\n"${t.text.slice(0, 250)}..."`;
-    }).join('\n\n')}\n`
-    : "";
+  if (!apiKey) throw new Error("Chave API não encontrada.");
 
   const ai = new GoogleGenAI({ apiKey });
 
   const prompt = `
-CONTEXTO CLÍNICO:
-${context}
+ATUE COMO: Supervisor Clínico em PBT (Process-Based Therapy) e PBE.
+PACIENTE: ${patient?.name || 'Paciente'}
+CONTEXTO ATUAL: ${context}
+FALA/RELATO RECENTE: "${input}"
 
-TERAPEUTA RELATOU:
-"${currentInput}"
-${techniquesContext}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+MISSÃO:
+Não apenas converse. Identifique quaiquer PROCESSOS DISFUNCIONAIS ativos neste momento (ex: Fusão Cognitiva, Evitação Experiencial, Falta de Clareza de Valores, Rito Rígido).
+
 TAREFA:
-Atue como Supervisor Clínico Sênior baseado em evidências.
+1. Identifique o processo-alvo principal na fala.
+2. Sugira UMA intervenção prática e imediata baseada em abordagens como TCC, ACT ou DBT.
+3. Se houver risco de vida, alerte imediatamente com **RISCO**.
 
-HIERARQUIA DE EVIDÊNCIA (OBRIGATÓRIA):
-${techniques.length > 0 ? `
-1. PRIORIZE as técnicas da literatura fornecida acima.
-2. Cite a fonte quando usar (ex: "Segundo [Nome do Livro]...")
-3. NUNCA invente citações ou páginas que não estejam nos materiais.
-` : `
-1. Use conhecimento geral de TCC/ACT/DBT.
-2. NÃO cite livros específicos ou páginas (não foram fornecidos).
-3. Base-se em princípios consolidados.
-`}
-
-REGRA ANTI-ALUCINAÇÃO:
-- Só cite fonte/página se ENCONTROU no material acima.
-- Se não encontrou, diga: "Baseado em princípios gerais de TCC..."
-
-RESPOSTA:
-Forneça UMA sugestão prática (2-3 frases) sobre o que fazer AGORA.
-Seja direto. Dê a INTERVENÇÃO, não teoria.
-    `;
+Responda de forma direta e concisa (máx 3 frases).
+`;
 
   try {
     const result = await ai.models.generateContent({
@@ -300,10 +268,144 @@ Seja direto. Dê a INTERVENÇÃO, não teoria.
       config: { temperature: 0.3 }
     });
 
-    return result.text;
-  } catch (error) {
-    console.error("CoPilot error:", error);
-    return "Sugestão indisponível no momento.";
+    return result.text || "Sugestão indisponível.";
+  } catch (e) {
+    console.error("CoPilot Error:", e);
+    return "Sugestão indisponível.";
+  }
+};
+
+// === 2. GERADOR DE ROTEIRO (GPS Terapêutico) ===
+export const generateSessionScript = async (patientName: string, lastSession: string, plan: string, isCrisis: boolean, crisisDetail: string = "") => {
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.VITE_API_KEY;
+  if (!apiKey) throw new Error("Chave API não encontrada.");
+
+  const ai = new GoogleGenAI({ apiKey });
+
+  const baseInstructions = `
+VOCÊ É: Um supervisor clínico especializado em preparação de sessões.
+
+FORMATO DE RESPOSTA (OBRIGATÓRIO):
+Primeiro, forneça um **RESUMO BREVE DA ÚLTIMA SESSÃO** (2-3 frases).
+Depois, forneça o **ROTEIRO DA SESSÃO DE HOJE** como um checklist Markdown.
+
+Exemplo de formato:
+---
+📝 **ÚLTIMA SESSÃO:**
+[Resumo aqui]
+
+📋 **ROTEIRO DE HOJE:**
+- [ ] Item 1
+- [ ] Item 2
+---
+`;
+
+  const prompt = isCrisis
+    ? `${baseInstructions}
+MODO CRISE: O paciente ${patientName} trouxe uma situação de urgência: "${crisisDetail}". 
+IGNORE o plano de tratamento padrão por hoje. 
+Crie um roteiro de sessão focado em ACOLHIMENTO, ESTABILIZAÇÃO e SEGURANÇA.
+Ainda assim, mencione brevemente a última sessão para contexto.
+Última sessão: "${lastSession}"`
+    : `${baseInstructions}
+MODO PLANO: Paciente ${patientName}. 
+Resumo da última sessão: "${lastSession}". 
+Plano de Tratamento atual: "${plan}". 
+Crie o roteiro da sessão de hoje (Agenda da Sessão) baseada na continuidade e no plano.`;
+
+  try {
+    const result = await ai.models.generateContent({
+      model: RATES.FAST,
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      config: { temperature: 0.4 }
+    });
+
+    return result.text || "- [ ] Erro ao gerar roteiro.";
+  } catch (e) {
+    console.error("Script Gen Error:", e);
+    return "- [ ] Erro ao gerar roteiro.";
+  }
+};
+
+// === 3. PLANEJAMENTO COM BIBLIOTECA ===
+export const generatePlanFromMaterial = async (patientData: string, fileSource: { type: 'library' | 'upload', info: string }) => {
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.VITE_API_KEY;
+  if (!apiKey) throw new Error("Chave API não encontrada.");
+
+  const ai = new GoogleGenAI({ apiKey });
+
+  try {
+    let base64 = '';
+
+    if (fileSource.type === 'library') {
+      // 1. Fetch file from public library
+      const response = await fetch(`/library/${fileSource.info}`);
+      if (!response.ok) throw new Error(`Livro/Arquivo ${fileSource.info} não encontrado.`);
+
+      const blob = await response.blob();
+      base64 = await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const result = reader.result as string;
+          resolve(result.split(',')[1]);
+        };
+        reader.readAsDataURL(blob);
+      });
+    } else {
+      // 2. Direct Base64 (remove prefix if present)
+      base64 = fileSource.info.includes('base64,') ? fileSource.info.split('base64,')[1] : fileSource.info;
+    }
+
+    const prompt = `
+LEIA O PDF ANEXO. É um material clínico (protocolo, livro ou guideline).
+Crie um plano de tratamento para o seguinte caso clínico, seguindo ESTRITAMENTE este material.
+
+CASO CLÍNICO:
+${patientData}
+
+TAREFA:
+Extraia do PDF as fases, intervenções e lógica de tratamento e aplique ao caso.
+
+Responda em JSON:
+{
+  "protocol": "Nome extraído do PDF",
+  "totalSessions": "Estimativa baseada no PDF",
+  "frequency": "Semanal/Quinzenal",
+  "phases": [
+    {
+      "name": "Nome da Fase (segundo PDF)",
+      "sessions": "X-Y",
+      "objectives": ["obj1", "obj2"],
+      "interventions": ["int1", "int2"],
+      "techniques": ["tech1", "tech2"]
+    }
+  ],
+  "dischargeCriteria": ["critério1", "critério2"]
+}
+`;
+
+    const result = await ai.models.generateContent({
+      model: RATES.DEEP,
+      contents: [
+        {
+          role: "user",
+          parts: [
+            { text: prompt },
+            { inlineData: { data: base64, mimeType: "application/pdf" } }
+          ]
+        }
+      ],
+      config: {
+        responseMimeType: "application/json",
+        temperature: 0.1
+      }
+    });
+
+    return JSON.parse(result.text || '{}');
+
+  } catch (e) {
+    console.error("Library Plan Error:", e);
+    throw e;
   }
 };
 
@@ -345,7 +447,7 @@ export const analyzeEvolution = async (sessions: any[], assessments: any[], crit
   const ai = new GoogleGenAI({ apiKey });
 
   const sessionSummary = sessions.slice(0, 5).map((s, i) =>
-    `**Sessão ${i + 1}** (${new Date(s.date).toLocaleDateString()}):\n- Queixa: ${s.soap.queixa_principal}\n- Plano: ${s.soap.plano.join(', ')}`
+    `** Sessão ${i + 1}** (${new Date(s.date).toLocaleDateString()}): \n - Queixa: ${s.soap.queixa_principal} \n - Plano: ${s.soap.plano.join(', ')} `
   ).join('\n\n');
 
   const assessmentSummary = assessments.map(a =>
@@ -354,7 +456,7 @@ export const analyzeEvolution = async (sessions: any[], assessments: any[], crit
 
   const prompt = `
 VOCÊ É: Especialista em Análise de Evolução Clínica.
-MISSÃO: Cruzar dados qualitativos (sessões) com quantitativos (escalas) para detectar padrões de melhora ou piora.
+  MISSÃO: Cruzar dados qualitativos(sessões) com quantitativos(escalas) para detectar padrões de melhora ou piora.
 
 SESSÕES RECENTES:
 ${sessionSummary}
@@ -367,7 +469,7 @@ ${criteria.map(c => `- ${c.criterion}: ${c.status}`).join('\n')}
 
 TAREFA:
 1. Analise a evolução do paciente comparando sessões e scores.
-2. Identifique padrões (melhora, estagnação, piora).
+2. Identifique padrões(melhora, estagnação, piora).
 3. Atualize o status dos critérios de alta se houver evidência clara.
 4. Formate a resposta em Markdown profissional.
   `;
@@ -399,31 +501,37 @@ export const evolvePBT = async (currentPBT: any, notes: string, analysis: any) =
   const currentNodesDesc = currentPBT.nodes.map((n: any) => `${n.id}: ${n.label} (${n.category})`).join('\n');
 
   const prompt = `
-VOCÊ É: Especialista em Process-Based Therapy (PBT).
-MISSÃO: Detectar novos processos ou mudanças na rede PBT baseado na última sessão.
+VOCÊ É: Especialista em Process - Based Therapy(PBT) com foco em monitoramento contínuo.
+  MISSÃO: Testar e ajustar a rede PBT(hipótese clínica) baseado nos novos dados da sessão.
 
-REDE PBT ATUAL:
+FILOSOFIA DE ATUALIZAÇÃO:
+- A rede anterior era uma HIPÓTESE.A sessão confirmou ou refutou essa hipótese ?
+  - Teste : As intervenções alteraram os nós esperados ? As conexões se mantiveram ?
+
+    REDE PBT ATUAL:
 ${currentNodesDesc}
 
 NOTAS DA ÚLTIMA SESSÃO:
 ${notes}
 
 TAREFA:
-1. Identifique se há novos processos cognitivos, afetivos ou comportamentais mencionados.
-2. Detecte mudanças de intensidade em processos existentes.
-3. Se houver mudanças, liste:
-   - newNodes: novos processos (formato: {id, label, category, change: "novo"})
-   - updates: mudanças em nós existentes
+1. Identifique novos processos(nós) que surgiram.
+2. Reavalie a FORÇA das conexões existentes:
+- Alguma conexão "Forte" se mostrou mais fraca ou periférica ?
+  - Algum ciclo de feedback(↔) foi quebrado ou descoberto ?
+    3. Liste as mudanças:
+- newNodes: novos processos detectados.
+   - updates: alterações em nós / conexões existentes(ex: mudar "change" para "diminuiu", mudar peso de "forte" para "moderado").
 4. Se não houver mudanças significativas, retorne hasChanges: false.
 5. Responda APENAS em JSON no formato:
 {
   "hasChanges": boolean,
-  "reasoning": string,
-  "newNodes": [],
-  "newEdges": [],
-  "updates": []
+    "reasoning": string,
+      "newNodes": [],
+        "newEdges": [],
+          "updates": []
 }
-  `;
+`;
 
   try {
     const result = await ai.models.generateContent({
@@ -464,7 +572,7 @@ export const adaptProtocol = async (protocolText: string, patientContext: string
 
   const prompt = `
 VOCÊ É: Especialista em Adaptação de Protocolos Clínicos.
-MISSÃO: Transformar protocolos genéricos em planos personalizados.
+  MISSÃO: Transformar protocolos genéricos em planos personalizados.
 
 CONTEXTO DO PACIENTE:
 ${patientContext}
@@ -474,16 +582,16 @@ ${protocolText}
 
 TAREFA:
 1. Identifique os passos principais do protocolo.
-2. Adapte cada passo ao contexto do paciente (idade, profissão, histórico).
+2. Adapte cada passo ao contexto do paciente(idade, profissão, histórico).
 3. Crie uma metáfora central que faça sentido para esse paciente.
 4. Retorne em JSON:
 {
   "metaphor": "Metáfora adaptada",
-  "steps": [
-    {"originalTitle": "Passo X", "adaptation": "Adaptação personalizada"}
-  ]
+    "steps": [
+      { "originalTitle": "Passo X", "adaptation": "Adaptação personalizada" }
+    ]
 }
-  `;
+`;
 
   try {
     const result = await ai.models.generateContent({
@@ -508,29 +616,29 @@ export const generateInitialFormulation = async (anamnesisText: string, assessme
 
   const ai = new GoogleGenAI({ apiKey });
 
-  const assessmentSummary = assessments.map(a => `${a.type}: ${a.score}`).join('\n');
+  const assessmentSummary = assessments.map(a => `${a.type}: ${a.score} `).join('\n');
 
   const prompt = `
-VOCÊ É: Especialista em Formulação de Caso (Modelo Eells).
-MISSÃO: Gerar formulação inicial baseada em anamnese e avaliações.
+VOCÊ É: Especialista em Formulação de Caso(Modelo Eells).
+  MISSÃO: Gerar formulação inicial baseada em anamnese e avaliações.
 
-ANAMNESE:
+    ANAMNESE:
 ${anamnesisText}
 
 AVALIAÇÕES:
 ${assessmentSummary}
 
 TAREFA:
-1. Sugira um diagnóstico preliminar (DSM-5/CID-11).
+1. Sugira um diagnóstico preliminar(DSM - 5 / CID - 11).
 2. Escreva uma narrativa explicativa integrando história de vida e sintomas atuais.
-3. Liste intervenções baseadas em evidências (guidelines APA, NICE, etc).
+3. Liste intervenções baseadas em evidências(guidelines APA, NICE, etc).
 4. Retorne em JSON:
 {
   "suggestedDiagnosis": "Diagnóstico",
-  "narrativeDraft": "Narrativa Eells",
-  "guidelineRecommendations": [{"title": "X", "relevance": "Alta/Média", "source": "Fonte"}]
+    "narrativeDraft": "Narrativa Eells",
+      "guidelineRecommendations": [{ "title": "X", "relevance": "Alta/Média", "source": "Fonte" }]
 }
-  `;
+`;
 
   try {
     const result = await ai.models.generateContent({
@@ -545,6 +653,262 @@ TAREFA:
     return JSON.parse(result.text || '{"suggestedDiagnosis": "Erro", "narrativeDraft": "", "guidelineRecommendations": []}');
   } catch (error) {
     console.error("Error generating formulation:", error);
+    throw error;
+  }
+};
+
+// ========================================
+// GERAÇÃO AUTOMÁTICA DE FICHA DE EVOLUÇÃO
+// ========================================
+
+const prontuarioRecordSchema: Schema = {
+  type: Type.OBJECT,
+  properties: {
+    intervention: {
+      type: Type.STRING,
+      description: "Descrição detalhada das intervenções e técnicas utilizadas na sessão"
+    },
+    demandAssessment: {
+      type: Type.STRING,
+      description: "Avaliação da demanda principal apresentada pelo paciente"
+    },
+    objectives: {
+      type: Type.STRING,
+      description: "Objetivos trabalhados e próximos passos definidos"
+    },
+    preSessionNotes: {
+      type: Type.STRING,
+      description: "Observações prévias à sessão (se houver menção)"
+    },
+    evolution: {
+      type: Type.STRING,
+      description: "Descrição da evolução do paciente desde a última sessão"
+    },
+    observation: {
+      type: Type.STRING,
+      description: "Observações clínicas adicionais do profissional"
+    },
+    homework: {
+      type: Type.STRING,
+      description: "Tarefas e atividades propostas para o paciente"
+    },
+    continuity: {
+      type: Type.STRING,
+      description: "Registro de encaminhamento, continuidade ou encerramento do tratamento"
+    }
+  },
+  required: ["intervention", "demandAssessment", "objectives", "evolution", "continuity"]
+};
+
+export const generateSessionRecord = async (
+  sessionData: {
+    soap: {
+      queixa_principal: string;
+      subjetivo: { conteudo: string; citacao: string }[];
+      objetivo: string;
+      avaliacao: string;
+      plano: string[];
+    };
+    notes?: string;
+    patientName?: string;
+  }
+) => {
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.VITE_API_KEY;
+  if (!apiKey) throw new Error("Chave de API não encontrada.");
+
+  const ai = new GoogleGenAI({ apiKey: apiKey });
+
+  const prompt = `
+VOCÊ É: Um assistente especializado em documentação clínica conforme Resolução CFP nº 01/2009.
+
+DADOS DA SESSÃO:
+Paciente: ${sessionData.patientName || 'N/A'}
+
+QUEIXA PRINCIPAL:
+${sessionData.soap.queixa_principal}
+
+SUBJETIVO (Relato do paciente):
+${sessionData.soap.subjetivo.map(s => `- ${s.conteudo}`).join('\n')}
+
+OBJETIVO (Observações clínicas):
+${sessionData.soap.objetivo}
+
+AVALIAÇÃO CLÍNICA:
+${sessionData.soap.avaliacao}
+
+PLANO TERAPÊUTICO:
+${sessionData.soap.plano.join('\n')}
+
+${sessionData.notes ? `ANOTAÇÕES ADICIONAIS DO TERAPEUTA:\n${sessionData.notes}` : ''}
+
+TAREFA:
+Gere uma FICHA DE EVOLUÇÃO formal e profissional para prontuário clínico, preenchendo cada campo com linguagem técnica adequada.
+
+REGRAS IMPORTANTES:
+1. Use linguagem formal e técnica (ex: "Paciente refere...", "Observou-se...", "Foi realizada...")
+2. Seja descritivo mas conciso
+3. Se não houver informação para um campo, use "Não há registro específico sobre este tópico nas anotações da sessão."
+4. O campo "continuity" deve sempre indicar se o tratamento continua, foi encerrado ou há encaminhamento
+`;
+
+  try {
+    const result = await ai.models.generateContent({
+      model: RATES.DEEP,
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: prontuarioRecordSchema,
+        temperature: 0.2,
+      }
+    });
+
+    return JSON.parse(result.text || '{}');
+  } catch (error) {
+    console.error("Error generating session record:", error);
+    throw error;
+  }
+};
+
+// ========================================
+// PLANO DE TRATAMENTO (PBE)
+// ========================================
+
+export const generateTreatmentSuggestions = async (
+  patientData: {
+    anamnesis: string;
+    formulation: any;
+    pbtNetwork: { nodes: any[]; edges: any[] };
+    diagnosis?: string;
+    comorbidities?: string[];
+  }
+) => {
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.VITE_API_KEY;
+  if (!apiKey) throw new Error("Chave de API não encontrada.");
+
+  const ai = new GoogleGenAI({ apiKey: apiKey });
+
+  const prompt = `
+Você é um supervisor clínico especializado em Prática Baseada em Evidências (PBE).
+
+DADOS DO PACIENTE:
+Diagnóstico: ${patientData.diagnosis || 'A definir'}
+Comorbidades: ${patientData.comorbidities?.join(', ') || 'Nenhuma identificada'}
+
+ANAMNESE:
+${patientData.anamnesis || 'Não disponível'}
+
+CONCEITUAÇÃO DE CASO:
+${JSON.stringify(patientData.formulation, null, 2) || 'Não disponível'}
+
+REDE PBT (Processos-alvo):
+${patientData.pbtNetwork?.nodes?.map(n => `- ${n.label} (${n.category})`).join('\n') || 'Não disponível'}
+
+TAREFA:
+Analise o caso e sugira:
+1. GUIDELINES internacionais relevantes (NICE, APA, WHO, etc.)
+2. PROTOCOLOS manualizados aplicáveis (com número de sessões típico)
+3. LACUNAS de informação que o clínico deveria investigar
+4. ABORDAGENS alternativas viáveis
+
+Responda em JSON:
+{
+  "suggestions": [
+    { "type": "guideline", "title": "...", "description": "...", "source": "..." },
+    { "type": "protocol", "title": "...", "description": "..." },
+    { "type": "gap", "title": "...", "description": "..." },
+    { "type": "approach", "title": "...", "description": "..." }
+  ]
+}
+`;
+
+  try {
+    const result = await ai.models.generateContent({
+      model: RATES.DEEP,
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      config: {
+        temperature: 0.3,
+        responseMimeType: "application/json"
+      }
+    });
+
+    return JSON.parse(result.text || '{"suggestions": []}');
+  } catch (error) {
+    console.error("Error generating treatment suggestions:", error);
+    throw error;
+  }
+};
+
+export const generateTreatmentPlan = async (
+  patientData: {
+    anamnesis: string;
+    formulation: any;
+    pbtNetwork: { nodes: any[]; edges: any[] };
+    selectedProtocols: string[];
+    customFocus?: string;
+  }
+) => {
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.VITE_API_KEY;
+  if (!apiKey) throw new Error("Chave de API não encontrada.");
+
+  const ai = new GoogleGenAI({ apiKey: apiKey });
+
+  const prompt = `
+Você é um supervisor clínico especializado em PBE (Prática Baseada em Evidências).
+
+DADOS DO PACIENTE:
+${patientData.anamnesis ? `ANAMNESE:\n${patientData.anamnesis.substring(0, 2000)}` : ''}
+
+CONCEITUAÇÃO:
+${JSON.stringify(patientData.formulation, null, 2) || 'Não disponível'}
+
+PROCESSOS-ALVO (Rede PBT):
+${patientData.pbtNetwork?.nodes?.slice(0, 10).map(n => `- ${n.label} (${n.category})`).join('\n') || 'Não disponível'}
+
+PROTOCOLOS SELECIONADOS:
+${patientData.selectedProtocols?.join(', ') || 'Nenhum específico'}
+
+${patientData.customFocus ? `FOCO ADICIONAL DO CLÍNICO:\n${patientData.customFocus}` : ''}
+
+TAREFA:
+Gere um PLANO DE TRATAMENTO estruturado em fases. Baseie-se nos protocolos selecionados.
+
+Responda em JSON:
+{
+  "protocol": "Nome do protocolo principal",
+  "totalSessions": "X-Y",
+  "frequency": "Semanal/Quinzenal",
+  "phases": [
+    {
+      "name": "Fase Inicial",
+      "sessions": "1-4",
+      "objectives": ["objetivo1", "objetivo2"],
+      "interventions": ["intervenção1", "intervenção2"],
+      "techniques": ["técnica1", "técnica2"]
+    }
+  ],
+  "dischargeCriteria": ["critério1", "critério2"]
+}
+
+REGRAS:
+1. Divida em 3 fases mínimo (Inicial, Intermediária, Final)
+2. O número de sessões deve seguir o protocolo citado
+3. Priorize intervenções para os processos centrais da rede PBT
+4. Inclua técnicas específicas com base no protocolo
+`;
+
+  try {
+    const result = await ai.models.generateContent({
+      model: RATES.DEEP,
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      config: {
+        temperature: 0.2,
+        responseMimeType: "application/json"
+      }
+    });
+
+    return JSON.parse(result.text || '{}');
+  } catch (error) {
+    console.error("Error generating treatment plan:", error);
     throw error;
   }
 };

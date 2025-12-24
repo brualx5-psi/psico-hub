@@ -15,6 +15,8 @@ import { AnamnesisForm } from './AnamnesisForm';
 import { ProblemListCard } from './ProblemListCard';
 import { GoalsManager } from './GoalsManager';
 import { InterventionsPanel } from './InterventionsPanel';
+import { ProntuarioCRP } from './ProntuarioCRP';
+import { TreatmentPlanTab } from './TreatmentPlanTab';
 import {
     BrainCircuit,
     Target,
@@ -65,40 +67,10 @@ export const ClinicalWorkspace: React.FC = () => {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     // Mantive os IDs técnicos (dashboard, soap, etc) mas mudei os rótulos visuais abaixo
-    const [activeTab, setActiveTab] = useState<'dashboard' | 'soap' | 'network' | 'plan' | 'forms' | 'anamnesis' | 'formulation' | 'curation' | 'evolution' | 'alchemy' | 'copilot' | 'eells'>('dashboard');
+    const [activeTab, setActiveTab] = useState<'dashboard' | 'soap' | 'network' | 'plan' | 'forms' | 'anamnesis' | 'formulation' | 'curation' | 'evolution' | 'alchemy' | 'copilot' | 'eells' | 'prontuario'>('dashboard');
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
     if (!currentPatient) return null;
-
-    const handleExportRecords = () => {
-        if (!currentPatient) return;
-
-        let content = `PRONTUÁRIO CLÍNICO: ${currentPatient.name.toUpperCase()}\n`;
-        content += `Gerado em: ${new Date().toLocaleDateString()}\n\n`;
-        content += "================================================\n\n";
-
-        currentPatient.clinicalRecords.sessions.forEach((session, index) => {
-            const date = new Date(session.date).toLocaleDateString();
-            content += `SESSÃO ${currentPatient.clinicalRecords.sessions.length - index} - DATA: ${date}\n`;
-            content += "------------------------------------------------\n";
-            content += `QUEIXA PRINCIPAL: ${session.soap.queixa_principal}\n\n`;
-            content += `[S] SUBJETIVO:\n${session.soap.subjetivo.map(s => `- ${s.conteudo}`).join('\n')}\n\n`;
-            content += `[O] OBJETIVO: ${session.soap.objetivo}\n\n`;
-            content += `[A] AVALIAÇÃO: ${session.soap.avaliacao}\n\n`;
-            content += `[P] PLANO: \n${session.soap.plano.map(p => `- ${p}`).join('\n')}\n`;
-            content += "\n================================================\n\n";
-        });
-
-        const blob = new Blob([content], { type: 'text/plain' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `Prontuario_${currentPatient.name.replace(/\s+/g, '_')}.txt`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-    };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -135,6 +107,34 @@ export const ClinicalWorkspace: React.FC = () => {
         } finally {
             setLoading(false);
         }
+    };
+
+
+
+    // Handler for PBT Graph updates (Persistence) - Copied from PatientDashboard for consistency
+    const handleGraphUpdate = (newNodes: any[], newEdges: any[]) => {
+        if (!currentPatient) return;
+
+        const updatedPatient = JSON.parse(JSON.stringify(currentPatient));
+        if (!updatedPatient.clinicalRecords.sessions) updatedPatient.clinicalRecords.sessions = [];
+
+        if (updatedPatient.clinicalRecords.sessions.length === 0) {
+            updatedPatient.clinicalRecords.sessions.push({
+                id: crypto.randomUUID(),
+                date: new Date().toISOString(),
+                summary: "Sessão Inicial (Gerada Automaticamente)",
+                soap: { S: '', O: '', A: '', P: '' },
+                notes: "",
+                pbtNetwork: { nodes: [], edges: [] }
+            });
+        }
+
+        updatedPatient.clinicalRecords.sessions[0].pbtNetwork = {
+            nodes: newNodes,
+            edges: newEdges
+        };
+
+        updatePatient(updatedPatient);
     };
 
     const renderContent = () => {
@@ -194,6 +194,10 @@ export const ClinicalWorkspace: React.FC = () => {
                 return <CaseFormulation />;
             case 'curation':
                 return <CurationWorkspace />;
+            case 'prontuario':
+                return <ProntuarioCRP />;
+            case 'plan':
+                return <TreatmentPlanTab />;
             case 'evolution':
                 return (
                     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4">
@@ -204,15 +208,37 @@ export const ClinicalWorkspace: React.FC = () => {
             case 'alchemy':
                 return <AlchemyLab />;
             case 'network':
-                if (!result) return null;
+                // Prioritize analysis result, fallback to stored patient data
+                const pbtData = result?.pbt_network || currentPatient.clinicalRecords.sessions[0]?.pbtNetwork;
+
+                if (!pbtData || (!pbtData.nodes.length && !pbtData.edges.length)) {
+                    // Show empty state / onboarding if no data exists at all
+                    return (
+                        <div className="flex flex-col items-center justify-center h-full text-slate-400 space-y-4">
+                            <BrainCircuit className="w-16 h-16 opacity-20" />
+                            <div className="text-center">
+                                <p className="text-lg font-medium text-slate-300">Nenhuma Rede PBT Criada</p>
+                                <p className="text-sm text-slate-500 max-w-md mx-auto mt-1">
+                                    Analise um caso clínico para gerar a primeira versão ou use o botão "+" no gráfico para criar manualmente.
+                                </p>
+                            </div>
+                            {/* Allow manual creation even without data */}
+                            <div className="w-full h-[600px] mt-8 bg-black border border-slate-800 rounded-xl p-1 relative overflow-hidden">
+                                <PBTGraph nodes={[]} edges={[]} onGraphUpdate={handleGraphUpdate} />
+                            </div>
+                        </div>
+                    );
+                }
+
                 return (
                     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
                         <div className="bg-black border border-slate-800 rounded-xl p-6 shadow-2xl relative overflow-hidden">
                             <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-purple-500/50 to-transparent"></div>
                             <h3 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-purple-400 to-cyan-400 mb-2 flex items-center gap-2 relative z-10">
                                 <BrainCircuit className="w-6 h-6 text-cyan-400" />REDE DE PROCESSOS PBT
+                                {result ? <span className="text-xs bg-purple-900/50 text-purple-300 px-2 py-0.5 rounded border border-purple-500/30">Análise Atual</span> : <span className="text-xs bg-slate-800 text-slate-400 px-2 py-0.5 rounded border border-slate-700">Histórico do Paciente</span>}
                             </h3>
-                            <PBTGraph nodes={result.pbt_network.nodes} edges={result.pbt_network.edges} />
+                            <PBTGraph nodes={pbtData.nodes} edges={pbtData.edges} onGraphUpdate={handleGraphUpdate} />
                         </div>
                     </div>
                 );
@@ -308,19 +334,8 @@ export const ClinicalWorkspace: React.FC = () => {
                 onToggle={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
             />
 
-            {/* Main Content Area - Removed ml-64 as flex layout handles spacing automatically */}
+            {/* Main Content Area */}
             <main className="flex-1 flex flex-col overflow-hidden relative bg-slate-50 transition-all duration-300">
-                {/* Top Bar with Export */}
-                <div className="h-14 bg-white border-b border-gray-200 flex items-center justify-end px-6 flex-none">
-                    <button
-                        onClick={handleExportRecords}
-                        className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg flex items-center gap-2 text-xs font-medium transition-colors shadow-sm"
-                        title="Baixar Prontuário Completo"
-                    >
-                        <Download className="w-4 h-4" />
-                        Exportar Prontuário
-                    </button>
-                </div>
 
                 {/* Content Container */}
                 <div className="flex-1 overflow-auto p-6">

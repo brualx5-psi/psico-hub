@@ -26,12 +26,56 @@ export const PatientProvider: React.FC<{ children: ReactNode }> = ({ children })
         if (saved) {
             try {
                 const loaded = JSON.parse(saved);
-                // Auto-migrar pacientes antigos para formato Eells
                 const migrated = loaded.map((p: Patient) => migratePatientToEells(p));
                 setPatients(migrated);
             } catch (e) {
                 console.error("Failed to parse patients from local storage", e);
             }
+        } else {
+            // DEMO PATIENT: Maria Silva Santos
+            const demoId = crypto.randomUUID();
+            const mariaData: Patient = {
+                id: demoId,
+                name: "Maria Silva Santos",
+                birthDate: "1985-05-15",
+                createdAt: new Date().toISOString(),
+                clinicalRecords: {
+                    anamnesis: { content: "Paciente relata ansiedade e insônia após perda de emprego.", updatedAt: new Date().toISOString(), history: [] },
+                    caseFormulation: { content: "", updatedAt: new Date().toISOString() },
+                    treatmentPlan: { goals: ["Reduzir ruminação", "Melhorar sono"], updatedAt: new Date().toISOString() },
+                    assessments: [],
+                    customProtocols: [],
+                    sessions: []
+                },
+                eellsData: {
+                    ...initializeEellsData(),
+                    pbt: {
+                        nodes: [
+                            { id: 'node-1', label: 'Desemprego', category: 'Contexto', change: 'novo', isTarget: false, isModerator: true }, // MODERATOR (Rounded)
+                            { id: 'node-2', label: 'Preocupação', category: 'Cognitiva', change: 'aumentou', isTarget: true }, // MEDIATOR (Square)
+                            { id: 'node-3', label: 'Isolamento', category: 'Comportamento', change: 'aumentou' },
+                            { id: 'node-4', label: 'Motivação', category: 'Motivacional', change: 'diminuiu' },
+                            { id: 'node-5', label: 'Tristeza', category: 'Afetiva', change: 'estavel' },
+                            { id: 'node-6', label: 'Insônia', category: 'Biofisiológica', change: 'aumentou' },
+                            { id: 'node-7', label: 'Irritabilidade', category: 'Afetiva', change: 'aumentou' }
+                        ],
+                        edges: [
+                            // 1. Unidirectional (Black)
+                            { source: 'node-1', target: 'node-2', relation: 'Gatilho', weight: 'forte', polarity: 'positive' },
+
+                            // 2. Feedback Loop (Black-Black) "Spiral"
+                            { source: 'node-2', target: 'node-3', relation: 'Ciclo Vicioso', weight: 'moderado', bidirectional: true, polarity: 'positive', reversePolarity: 'positive' },
+
+                            // 3. Inhibition Loop (White-White) "Seesaw"
+                            { source: 'node-4', target: 'node-5', relation: 'Conflito', weight: 'moderado', bidirectional: true, polarity: 'negative', reversePolarity: 'negative' },
+
+                            // 4. Push-Pull (Black-White)
+                            { source: 'node-6', target: 'node-7', relation: 'Desgaste', weight: 'forte', bidirectional: true, polarity: 'positive', reversePolarity: 'negative' }
+                        ]
+                    }
+                }
+            };
+            setPatients([mariaData]);
         }
         setIsLoading(false);
     }, []);

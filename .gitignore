@@ -29,3 +29,16 @@ docs/*
 !docs/core
 !docs/protocols_map.json
 !docs/readme.md
+
+# Dependencies
+node_modules/
+
+# Environment Variables
+.env
+.env.local
+.env.*
+
+# Library PDFs (Heavy files)
+client/public/library/*.pdf
+client/public/library/**/*.pdf
+!client/public/library/.gitkeep

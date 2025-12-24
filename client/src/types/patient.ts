@@ -36,12 +36,34 @@ export interface ClinicalRecords {
     treatmentPlan: {
         goals: string[];
         updatedAt: string;
+        fullPlan?: any; // Plano completo gerado pela IA
     };
     assessments: Assessment[];
     customProtocols: Protocol[]; // New field for Curation/Adaptation plans
     sessions: SessionRecord[]; // Histórico das análises de IA
     dischargeCriteria?: DischargeCriteria[];
     evolutionAnalysis?: EvolutionAnalysis[];
+    chatHistory?: { role: 'user' | 'assistant'; content: string }[];
+    // Prontuário formal por sessão (CRP)
+    prontuarioRecords?: Record<string, ProntuarioRecord>;
+}
+
+// Estrutura do Prontuário Formal (Res. CFP 01/2009)
+export interface ProntuarioRecord {
+    // Dados da sessão
+    sessionDate: string;
+    consultationType: 'presencial' | 'online';
+    // Campos clínicos
+    intervention: string;         // Intervenção realizada
+    demandAssessment: string;     // Avaliação de demanda
+    objectives: string;           // Registros de objetivos
+    preSessionNotes: string;      // Anotações de antes da sessão
+    evolution: string;            // Evolução
+    observation: string;          // Observação
+    homework: string;             // Dever de casa
+    continuity: string;           // Registro de encaminhamento/encerramento/continuidade
+    // Metadata
+    updatedAt: string;
 }
 
 export interface Protocol {

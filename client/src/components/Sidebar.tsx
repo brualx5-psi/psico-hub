@@ -17,7 +17,7 @@ import {
     ChevronRight
 } from 'lucide-react';
 
-type TabType = 'dashboard' | 'soap' | 'network' | 'plan' | 'forms' | 'anamnesis' | 'formulation' | 'curation' | 'evolution' | 'alchemy' | 'copilot' | 'eells';
+type TabType = 'dashboard' | 'soap' | 'network' | 'plan' | 'forms' | 'anamnesis' | 'formulation' | 'curation' | 'evolution' | 'alchemy' | 'copilot' | 'eells' | 'prontuario';
 
 export interface SidebarProps {
     activeTab: TabType;
@@ -62,7 +62,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, isColl
                 { id: 'eells', label: 'Problemas & Metas', icon: Target },
                 { id: 'network', label: 'Rede PBT', icon: BrainCircuit },
                 { id: 'formulation', label: 'Conceituação', icon: Target },
-                { id: 'plan', label: 'Intervenções', icon: Sparkles }
+                { id: 'plan', label: 'Plano de Tratamento', icon: Sparkles }
             ]
         },
         {
@@ -71,8 +71,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, isColl
             icon: FileText,
             items: [
                 { id: 'copilot', label: 'Co-Piloto', icon: Zap },
-                { id: 'soap', label: 'Sessão Atual', icon: FileText },
-                { id: 'curation', label: 'Prontuário', icon: BookOpen }
+                { id: 'soap', label: 'Sessão Atual', icon: FileText }
             ]
         },
         {
@@ -80,6 +79,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, isColl
             label: 'Evolução',
             icon: TrendingUp,
             items: [
+                { id: 'prontuario', label: 'Fichas de Evolução', icon: BookOpen },
                 { id: 'evolution', label: 'Progresso', icon: TrendingUp },
                 { id: 'forms', label: 'Monitoramento', icon: ClipboardList },
                 { id: 'alchemy', label: 'Recursos', icon: Sparkles }

@@ -166,4 +166,10 @@ export interface EellsData {
 
     // 6. Progress
     progress: EellsProgress;
+
+    // 7. PBT Network
+    pbt?: {
+        nodes: any[];
+        edges: any[];
+    };
 }

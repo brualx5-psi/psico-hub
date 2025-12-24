@@ -181,6 +181,10 @@ export function initializeEellsData(): EellsData {
             discharge: 0,
             overall: 0,
             currentPhase: 'assessment'
+        },
+        pbt: {
+            nodes: [],
+            edges: []
         }
     };
 }
