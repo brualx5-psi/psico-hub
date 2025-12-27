@@ -309,6 +309,79 @@ RESPOSTA (Direta para o terapeuta ler ou adaptar):
   }
 };
 
+// ========================================
+// ANÁLISE ADAPTATIVA DE DEMANDA DA SESSÃO
+// ========================================
+
+export interface SessionAdaptation {
+  action: 'manter' | 'adicionar' | 'substituir';
+  reasoning: string;
+  patientName: string;
+  messageToTherapist: string;
+  newDemand?: string; // Se precisar mudar, qual é a nova demanda
+  suggestedAddition?: string; // Se for adicionar, o que adicionar
+}
+
+export const analyzeSessionDemand = async (
+  patientInput: string,
+  currentScript: string,
+  treatmentPlan: string,
+  patientName: string
+): Promise<SessionAdaptation> => {
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.VITE_API_KEY;
+  if (!apiKey) throw new Error("Chave de API não encontrada.");
+
+  const ai = new GoogleGenAI({ apiKey: apiKey });
+
+  const prompt = `VOCÊ É: Supervisor clínico inteligente que analisa se o roteiro de sessão precisa ser adaptado.
+
+CONTEXTO:
+- Nome do Paciente: ${patientName}
+- Plano de Tratamento Atual: ${treatmentPlan}
+- Roteiro de Sessão Planejado: ${currentScript}
+
+O PACIENTE ACABA DE DIZER (resposta sobre como foi a semana):
+"${patientInput}"
+
+ANÁLISE E DECISÃO:
+Analise o que o paciente trouxe e decida:
+
+1. **MANTER** - Se o conteúdo está alinhado com o plano e não há urgências
+2. **ADICIONAR** - Se surgiu algo importante que pode ser incluído sem abandonar o roteiro
+3. **SUBSTITUIR** - Se surgiu uma demanda mais urgente que justifica mudar o foco da sessão
+
+RESPONDA EM JSON:
+{
+  "action": "manter" | "adicionar" | "substituir",
+  "reasoning": "Breve explicação do porquê desta decisão",
+  "patientName": "${patientName}",
+  "messageToTherapist": "Mensagem natural e empática para o terapeuta (use o nome do paciente, seja direto e humano, máx 2 frases)",
+  "newDemand": "Se action=substituir, descreva a nova demanda para focar",
+  "suggestedAddition": "Se action=adicionar, descreva o que adicionar ao roteiro"
+}`;
+
+  try {
+    const result = await ai.models.generateContent({
+      model: RATES.FAST,
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      config: {
+        temperature: 0.3,
+        responseMimeType: "application/json"
+      }
+    });
+
+    return JSON.parse(result.text || '{"action":"manter","reasoning":"Erro","patientName":"Paciente","messageToTherapist":"Vamos continuar o roteiro."}');
+  } catch (e) {
+    console.error("Demand Analysis Error:", e);
+    return {
+      action: 'manter',
+      reasoning: 'Erro na análise',
+      patientName: patientName,
+      messageToTherapist: 'Vamos continuar com o roteiro planejado.'
+    };
+  }
+};
+
 // === 6. CONSULTOR DE BIBLIOTECA (Lê o PDF Físico) ===
 export const consultCoreLibrary = async (
   context: string,
@@ -484,28 +557,55 @@ SAÍDA ESPERADA (JSON):
   }
 };
 
-// === 8. RADAR DE PROCESSOS (AO VIVO) ===
-export const monitorActiveProcesses = async (lastMessages: string) => {
+// === 8. RADAR DE PROCESSOS (AO VIVO) - ENHANCED ===
+export interface ActiveProcess {
+  id: string;
+  label: string;
+  status: 'rigido' | 'flexivel' | 'enfraquecendo';
+  intensity: 'alta' | 'media' | 'baixa';
+  category: string;
+  isKnown: boolean; // true = já existe no PBT do paciente
+  connections?: string[]; // IDs de outros processos conectados
+}
+
+export const monitorActiveProcesses = async (
+  lastMessages: string,
+  existingPBTNodes?: Array<{ id: string; label: string; category: string }>
+) => {
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.VITE_API_KEY;
   if (!apiKey) throw new Error("Chave API não encontrada.");
 
   const ai = new GoogleGenAI({ apiKey });
+
+  // Build existing nodes context for cross-reference
+  const existingNodesContext = existingPBTNodes && existingPBTNodes.length > 0
+    ? `\nNÓS PBT JÁ MAPEADOS DO PACIENTE:\n${existingPBTNodes.map(n => `- "${n.label}" (${n.category})`).join('\n')}\n`
+    : '';
 
   const prompt = `
 ATUE COMO: Rastreador de Processos PBT em Tempo Real.
 CONTEXTO: Trecho recente da sessão.
 
 TEXTO: "${lastMessages}"
-
+${existingNodesContext}
 TAREFA:
-Liste apenas os PROCESSOS (Nós) que estão ativos/quentes nestas falas exatas.
-Classifique se estão "Rígidos" (Problemáticos) ou "Flexíveis" (Saudáveis).
+1. Liste os PROCESSOS (Nós) que estão ativos/quentes nestas falas.
+2. Classifique: "rigido" (Problemático), "flexivel" (Saudável), ou "enfraquecendo" (Melhorando).
+3. Se um processo detectado corresponde a um nó já mapeado do paciente, marque "isKnown": true.
+4. Identifique CONEXÕES entre os processos detectados (ex: "Autocrítica" → "Evitação").
 
 JSON:
 {
   "active_nodes": [
-    { "label": "Ex: Pensamento Catastrófico", "status": "rigido", "intensity": "alta", "category": "Cognitiva" },
-    { "label": "Ex: Contato com Valores", "status": "flexivel", "intensity": "media", "category": "Motivacional" }
+    { 
+      "id": "proc_1", 
+      "label": "Ex: Pensamento Catastrófico", 
+      "status": "rigido", 
+      "intensity": "alta", 
+      "category": "Cognitiva",
+      "isKnown": false,
+      "connections": ["proc_2"]
+    }
   ]
 }
 *Categorias aceitas: Cognitiva, Afetiva, Comportamento, Self, Contexto, Motivacional, Sociocultural, Atencional, Biofisiológica.*
@@ -513,7 +613,7 @@ JSON:
 
   try {
     const result = await ai.models.generateContent({
-      model: RATES.FAST, // Flash para ser instantâneo
+      model: RATES.DEEP, // Pro para análise mais profunda com cruzamento
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       config: {
         responseMimeType: "application/json",
@@ -526,6 +626,65 @@ JSON:
     return { active_nodes: [] };
   }
 };
+
+// === 9. VERIFICADOR DE PROGRESSO DO ROTEIRO (GPS) ===
+export interface ScriptItem {
+  id: string;
+  text: string;
+  completed: boolean;
+  priority: 'high' | 'normal' | 'low';
+}
+
+export const checkScriptProgress = async (
+  chatHistory: string,
+  scriptItems: string[],
+  patientName: string
+): Promise<{ completedItems: number[]; reasoning: string }> => {
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.VITE_API_KEY;
+  if (!apiKey) throw new Error("Chave API não encontrada.");
+
+  const ai = new GoogleGenAI({ apiKey });
+
+  const scriptList = scriptItems.map((item, idx) => `${idx}. ${item}`).join('\n');
+
+  const prompt = `
+ATUE COMO: Supervisor de Sessão Terapêutica.
+PACIENTE: ${patientName}
+
+ROTEIRO DA SESSÃO (itens numerados):
+${scriptList}
+
+HISTÓRICO DO CHAT ATÉ AGORA:
+${chatHistory}
+
+TAREFA:
+Analise o chat e determine quais itens do roteiro JÁ FORAM ABORDADOS (mesmo que parcialmente).
+Retorne os ÍNDICES (números) dos itens completos.
+
+JSON:
+{
+  "completedItems": [0, 1, 3],
+  "reasoning": "Explicação breve de como você identificou os itens completos"
+}
+`;
+
+  try {
+    const result = await ai.models.generateContent({
+      model: RATES.DEEP, // Pro para análise semântica precisa
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      config: {
+        responseMimeType: "application/json",
+        temperature: 0.1
+      }
+    });
+
+    return JSON.parse(result.text || '{ "completedItems": [], "reasoning": "" }');
+  } catch (error) {
+    console.error("Script Progress Error:", error);
+    return { completedItems: [], reasoning: 'Erro na análise' };
+  }
+};
+
 // === 3. PLANEJAMENTO COM BIBLIOTECA ===
 export const generatePlanFromMaterial = async (patientData: string, fileSource: { type: 'library' | 'upload', info: string }) => {
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.VITE_API_KEY;
@@ -818,24 +977,55 @@ export const generateInitialFormulation = async (anamnesisText: string, assessme
   const assessmentSummary = assessments.map(a => `${a.type}: ${a.score} `).join('\n');
 
   const prompt = `
-VOCÊ É: Especialista em Formulação de Caso(Modelo Eells).
-  MISSÃO: Gerar formulação inicial baseada em anamnese e avaliações.
+VOCÊ É: Especialista em Formulação de Caso (Modelo Eells - Case Formulation).
+MISSÃO: Gerar uma formulação de caso COMPLETA baseada em anamnese e avaliações.
 
-    ANAMNESE:
+ANAMNESE DO PACIENTE:
 ${anamnesisText}
 
-AVALIAÇÕES:
-${assessmentSummary}
+AVALIAÇÕES/ESCALAS:
+${assessmentSummary || 'Nenhuma avaliação disponível'}
 
 TAREFA:
-1. Sugira um diagnóstico preliminar(DSM - 5 / CID - 11).
-2. Escreva uma narrativa explicativa integrando história de vida e sintomas atuais.
-3. Liste intervenções baseadas em evidências(guidelines APA, NICE, etc).
-4. Retorne em JSON:
+Analise os dados e preencha TODOS os campos abaixo com informações detalhadas e clinicamente relevantes.
+Se não houver informação suficiente para um campo, faça uma inferência clínica baseada no que está disponível.
+NUNCA deixe campos vazios - sempre forneça conteúdo útil.
+
+CAMPOS A PREENCHER:
+
+1. **suggestedDiagnosis**: Diagnóstico preliminar (DSM-5/CID-11) com códigos se possível.
+
+2. **problemList**: Lista os principais sintomas, queixas e red flags identificados na anamnese (texto corrido, separado por ponto e vírgula).
+
+3. **precipitants**: Fatores precipitantes/gatilhos que desencadeiam ou agravam os sintomas (eventos, situações, pensamentos).
+
+4. **origins**: História de vida e origens do problema. Inclua fatores predisponentes, eventos significativos da infância/adolescência, padrões familiares.
+
+5. **resources**: Recursos e forças do paciente. Pontos positivos, habilidades, suporte social, motivação para mudança.
+
+6. **obstacles**: Obstáculos ao tratamento. Barreiras, resistências, fatores que podem dificultar o progresso.
+
+7. **narrativeDraft**: Narrativa explicativa integradora no estilo Eells. Conecte precipitantes, origens, mecanismos e problemas atuais em uma história coerente.
+
+8. **goals**: Objetivos terapêuticos de curto e longo prazo.
+
+9. **guidelineRecommendations**: Intervenções baseadas em evidências (NICE, APA, etc).
+
+Responda APENAS em JSON:
 {
-  "suggestedDiagnosis": "Diagnóstico",
-    "narrativeDraft": "Narrativa Eells",
-      "guidelineRecommendations": [{ "title": "X", "relevance": "Alta/Média", "source": "Fonte" }]
+  "suggestedDiagnosis": "Diagnóstico completo com códigos",
+  "problemList": "Sintoma 1; Sintoma 2; Sintoma 3; Red flags se houver",
+  "suicidality": false,
+  "chemicalDependence": false,
+  "precipitants": "Gatilho 1, Gatilho 2, Situações específicas",
+  "origins": "História de vida, fatores predisponentes, eventos formativos",
+  "resources": "Força 1, Recurso 2, Suporte disponível",
+  "obstacles": "Barreira 1, Obstáculo 2, Resistências identificadas",
+  "narrativeDraft": "Narrativa explicativa completa conectando todos os pontos...",
+  "goals": "Objetivo 1; Objetivo 2; Objetivo de longo prazo",
+  "guidelineRecommendations": [
+    { "title": "Intervenção X", "relevance": "Alta", "source": "NICE/APA" }
+  ]
 }
 `;
 
@@ -844,8 +1034,9 @@ TAREFA:
       model: RATES.DEEP,
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       config: {
-        temperature: 0.1,
-        responseMimeType: "application/json"
+        temperature: 0.2,
+        responseMimeType: "application/json",
+        safetySettings: SAFETY_SETTINGS_CLINICAL as any
       }
     });
 
@@ -1538,6 +1729,532 @@ Seja específico, cite os números, e mantenha o tom profissional mas acessível
     return parsed as MonitoringInsights;
   } catch (error) {
     console.error("Error generating monitoring insights:", error);
+    throw error;
+  }
+};
+
+// === SUGESTÃO DE LIÇÕES DE CASA ===
+export interface HomeworkSuggestion {
+  name: string;
+  description: string;
+  category: 'registro_pensamentos' | 'relaxamento' | 'exposicao' | 'ativacao_comportamental' | 'habilidades_sociais' | 'outro';
+  instructions: string;
+  rationale: string;
+  linkedGASMetaTitle?: string;
+}
+
+const homeworkSuggestionSchema: Schema = {
+  type: Type.OBJECT,
+  properties: {
+    suggestions: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          name: { type: Type.STRING, description: "Nome curto da tarefa" },
+          description: { type: Type.STRING, description: "Descrição breve" },
+          category: { type: Type.STRING, description: "Categoria: registro_pensamentos, relaxamento, exposicao, ativacao_comportamental, habilidades_sociais, outro" },
+          instructions: { type: Type.STRING, description: "Instruções detalhadas para o paciente" },
+          rationale: { type: Type.STRING, description: "Por que esta tarefa é indicada para este paciente" },
+          linkedGASMetaTitle: { type: Type.STRING, description: "Título da meta GAS relacionada, se houver" }
+        },
+        required: ["name", "description", "category", "instructions", "rationale"]
+      }
+    },
+    generalRationale: { type: Type.STRING, description: "Justificativa geral das sugestões" }
+  },
+  required: ["suggestions", "generalRationale"]
+};
+
+export const suggestHomeworkTasks = async (
+  sessionContent: string,
+  patientContext: {
+    name: string;
+    primaryDisorder?: string;
+    gasGoals?: Array<{ title: string; currentLevel: number }>;
+    previousTasks?: string[];
+  }
+): Promise<{ suggestions: HomeworkSuggestion[]; generalRationale: string }> => {
+  const genAI = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY || "" });
+
+  const gasGoalsText = patientContext.gasGoals?.length
+    ? patientContext.gasGoals.map(g => `- ${g.title} (nível atual: ${g.currentLevel})`).join('\n')
+    : 'Nenhuma meta GAS definida';
+
+  const previousTasksText = patientContext.previousTasks?.length
+    ? patientContext.previousTasks.join(', ')
+    : 'Nenhuma tarefa anterior';
+
+  const prompt = `Você é um assistente de terapia cognitivo-comportamental. Com base nos dados abaixo, sugira 2-4 lições de casa/tarefas terapêuticas adequadas para o paciente praticar entre as sessões.
+
+PACIENTE: ${patientContext.name}
+TRANSTORNO PRINCIPAL: ${patientContext.primaryDisorder || 'Não especificado'}
+
+METAS GAS ATIVAS:
+${gasGoalsText}
+
+TAREFAS JÁ PRESCRITAS ANTERIORMENTE (evite repetir):
+${previousTasksText}
+
+CONTEÚDO DA SESSÃO:
+${sessionContent}
+
+CATEGORIAS DISPONÍVEIS:
+- registro_pensamentos: Diários, RPD, questionamento socrático
+- relaxamento: Respiração, relaxamento muscular, mindfulness
+- exposicao: Hierarquia de medos, exposição gradual, interoceptiva
+- ativacao_comportamental: Agenda de atividades, monitoramento humor-atividade
+- habilidades_sociais: Assertividade, comunicação, contato visual
+
+INSTRUÇÕES:
+1. Sugira tarefas ESPECÍFICAS e PRÁTICAS
+2. Vincule as tarefas às metas GAS quando possível
+3. Seja realista sobre o que o paciente pode fazer
+4. Inclua instruções claras e detalhadas
+5. Evite sugerir tarefas já prescritas anteriormente`;
+
+  try {
+    const result = await genAI.models.generateContent({
+      model: RATES.FAST,
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: homeworkSuggestionSchema,
+        safetySettings: SAFETY_SETTINGS_CLINICAL as any
+      }
+    });
+
+    const parsed = JSON.parse(result.text || '{"suggestions": [], "generalRationale": ""}');
+    return parsed;
+  } catch (error) {
+    console.error("Error suggesting homework tasks:", error);
+    throw error;
+  }
+};
+
+// ====== TRATAMENTO: ANÁLISE CLÍNICA ======
+export const generateClinicalAnalysis = async (context: {
+  patientName: string;
+  sessionsCompleted: number;
+  currentPhase: string;
+  progress: string;
+  recentChanges: string;
+  currentPlan: any;
+  guidelinesPdfBase64?: string; // Optional: Base64 encoded PDF of clinical guidelines
+}) => {
+  const genAI = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY || "" });
+
+  const clinicalAnalysisSchema: Schema = {
+    type: Type.OBJECT,
+    properties: {
+      introduction: { type: Type.STRING, description: "Introdução contextualizando a análise" },
+      synthesis: { type: Type.STRING, description: "Síntese do progresso e status atual" },
+      protectionFactors: {
+        type: Type.ARRAY,
+        items: { type: Type.STRING },
+        description: "Fatores de proteção identificados"
+      },
+      riskFactors: {
+        type: Type.ARRAY,
+        items: { type: Type.STRING },
+        description: "Fatores de risco/vulnerabilidades"
+      },
+      recommendation: {
+        type: Type.STRING,
+        description: "maintain, partial_adjust ou major_reformulation"
+      },
+      recommendationText: {
+        type: Type.STRING,
+        description: "Explicação detalhada da recomendação com base em PBE"
+      },
+      sessionAdjustments: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            sessionNumber: { type: Type.NUMBER },
+            focusPrincipal: { type: Type.STRING },
+            objetivos: { type: Type.ARRAY, items: { type: Type.STRING } },
+            estrategias: { type: Type.ARRAY, items: { type: Type.STRING } }
+          }
+        },
+        description: "Ajustes específicos para próximas sessões (se aplicável)"
+      },
+      phaseAdjustments: { type: Type.STRING, description: "Ajustes nas fases seguintes" },
+      conclusion: { type: Type.STRING, description: "Conclusão clínica" },
+      references: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            citation: { type: Type.STRING },
+            description: { type: Type.STRING }
+          }
+        },
+        description: "Referências científicas relevantes"
+      }
+    },
+    required: ["introduction", "synthesis", "protectionFactors", "riskFactors", "recommendation", "recommendationText", "conclusion", "references"]
+  };
+
+  const prompt = `Você é um supervisor clínico experiente em Terapia Cognitivo-Comportamental (TCC) e Prática Baseada em Evidências.
+
+**CONTEXTO DO PACIENTE:**
+- Nome: ${context.patientName}
+- Sessões realizadas: ${context.sessionsCompleted}
+- Fase atual: ${context.currentPhase}
+- Progresso geral: ${context.progress}
+- Mudanças recentes no contexto: ${context.recentChanges}
+
+**PLANO ATUAL:**
+${JSON.stringify(context.currentPlan, null, 2)}
+
+**TAREFA:**
+Gere uma análise clínica abrangente e fundamentada em evidências para avaliar se o plano de tratamento deve ser:
+- **maintain**: Mantido sem alterações
+- **partial_adjust**: Ajustado parcialmente para responder a novas demandas
+- **major_reformulation**: Reformulado substancialmente
+
+**ESTRUTURA OBRIGATÓRIA:**
+
+1. **Introduction**: Contextualize a análise (2-3 parágrafos)
+
+2. **Synthesis**: Resuma o progresso do paciente, ganhos terapêuticos e transição de fases (2-3 parágrafos)
+
+3. **Fatores de Proteção vs Vulnerabilidades**: Liste 3-5 itens de cada lado
+
+4. **Recommendation**: 
+   - Escolha uma das três opções
+   - Justifique com base em princípios da PBE (Responsividade Terapêutica, Janela de Oportunidade, Abordagem Transdiagnóstica)
+
+5. **Session/Phase Adjustments**: Se recomendar ajuste, especifique sessões concretas com objetivos e estratégias
+
+6. **Conclusion**: Síntese da recomendação (1-2 parágrafos)
+
+7. **References**: 2-4 referências científicas relevantes
+
+**DIRETRIZES:**
+- Use linguagem técnica e profissional
+- Cite evidências quando possível
+- Seja específico e acionável
+- Mantenha tom objetivo mas compassivo
+${context.guidelinesPdfBase64 ? '\n**IMPORTANTE:** Um documento PDF com protocolos/diretrizes clínicas foi anexado. Use-o como referência para fundamentar suas recomendações.' : ''}`;
+
+  try {
+    // Build contents based on whether PDF is provided
+    const contents = context.guidelinesPdfBase64
+      ? [
+        {
+          role: "user", parts: [
+            { text: prompt },
+            { inlineData: { data: context.guidelinesPdfBase64, mimeType: "application/pdf" } }
+          ]
+        }
+      ]
+      : prompt;
+
+    const result = await genAI.models.generateContent({
+      model: RATES.DEEP,
+      contents,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: clinicalAnalysisSchema,
+        safetySettings: SAFETY_SETTINGS_CLINICAL as any
+      }
+    });
+
+    const parsed = JSON.parse(result.text || '{}');
+    return {
+      id: `analysis_${Date.now()}`,
+      generatedAt: new Date().toISOString(),
+      ...parsed
+    };
+  } catch (error) {
+    console.error("Error generating clinical analysis:", error);
+    throw error;
+  }
+};
+
+// ====== GAS: GERAÇÃO DE NÍVEIS SMART ======
+export const generateSmartGoalLevels = async (goalTitle: string, patientContext?: string) => {
+  const genAI = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY || "" });
+
+  const smartSchema: Schema = {
+    type: Type.OBJECT,
+    properties: {
+      minus2: { type: Type.STRING, description: "Descrição para nível -2 (muito pior que esperado)" },
+      minus1: { type: Type.STRING, description: "Descrição para nível -1 (pior que esperado)" },
+      zero: { type: Type.STRING, description: "Descrição para nível 0 (meta alcançada exatamente como esperado)" },
+      plus1: { type: Type.STRING, description: "Descrição para nível +1 (melhor que esperado)" },
+      plus2: { type: Type.STRING, description: "Descrição para nível +2 (muito melhor que esperado)" }
+    },
+    required: ["minus2", "minus1", "zero", "plus1", "plus2"]
+  };
+
+  const prompt = `Você é um especialista em definição de metas terapêuticas usando o modelo SMART e a Escala de Atingimento de Metas (GAS).
+
+META DO PACIENTE: "${goalTitle}"
+${patientContext ? `CONTEXTO: ${patientContext}` : ''}
+
+Gere descrições SMART para cada nível da escala GAS:
+
+**MODELO SMART:**
+- Específico: Detalhe exatamente o que será medido
+- Mensurável: Use métricas, percentuais, frequências ou contagens
+- Alcançável: Realista para o contexto terapêutico
+- Relevante: Alinhado com o objetivo principal
+- Temporal: Inclua referências temporais quando apropriado
+
+**NÍVEIS GAS:**
+- **-2 (Muito pior)**: Regressão significativa, piora clara
+- **-1 (Pior)**: Abaixo do esperado mas sem regressão severa  
+- **0 (Meta esperada)**: A meta atingida exatamente como planejado (baseline)
+- **+1 (Melhor)**: Superou a meta moderadamente
+- **+2 (Muito melhor)**: Excepcional, superou muito as expectativas
+
+**IMPORTANTE:**
+- Cada descrição deve ter 1-2 frases
+- Use linguagem objetiva e mensurável
+- Mantenha progressão lógica entre níveis
+- Exemplo de boa descrição: "Paciente atingiu exatamente a meta de 8 vezes de comunicação verbal por sessão em 2 meses"`;
+
+  try {
+    const result = await genAI.models.generateContent({
+      model: RATES.FAST,
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: smartSchema,
+        safetySettings: SAFETY_SETTINGS_CLINICAL as any
+      }
+    });
+
+    return JSON.parse(result.text || '{}');
+  } catch (error) {
+    console.error("Error generating SMART levels:", error);
+    throw error;
+  }
+};
+
+// ====== DEEP RESEARCH: RECOMENDAÇÃO DE PROTOCOLOS ======
+export const recommendProtocols = async (patientContext: {
+  name: string;
+  primaryDiagnosis?: string;
+  comorbidities?: string[];
+  age?: number;
+  presentingProblems?: string[];
+  previousTreatments?: string[];
+  preferences?: string;
+}) => {
+  const genAI = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY || "" });
+
+  const protocolSchema: Schema = {
+    type: Type.OBJECT,
+    properties: {
+      triadAnalysis: {
+        type: Type.OBJECT,
+        properties: {
+          evidenceConsiderations: { type: Type.STRING },
+          expertiseConsiderations: { type: Type.STRING },
+          patientContextConsiderations: { type: Type.STRING }
+        }
+      },
+      recommendations: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            protocolName: { type: Type.STRING },
+            authors: { type: Type.STRING },
+            evidenceLevel: { type: Type.STRING, description: "Nível de evidência: forte, moderado, emergente" },
+            indicationRationale: { type: Type.STRING, description: "Por que é indicado para este paciente" },
+            keyComponents: { type: Type.ARRAY, items: { type: Type.STRING } },
+            estimatedDuration: { type: Type.STRING },
+            reference: { type: Type.STRING }
+          }
+        }
+      },
+      summaryRecommendation: { type: Type.STRING }
+    },
+    required: ["triadAnalysis", "recommendations", "summaryRecommendation"]
+  };
+
+  const prompt = `Você é um consultor de Prática Baseada em Evidências (PBE) em psicoterapia, especializado em identificar os melhores protocolos e guidelines para cada paciente.
+
+**TRÍADE DA PBE:**
+1. **Melhor Evidência Disponível**: Pesquise protocolos com forte suporte empírico
+2. **Expertise Clínica**: Considere aplicabilidade prática e adaptações necessárias
+3. **Contexto do Paciente**: Preferências, valores, recursos e características únicas
+
+**PERFIL DO PACIENTE:**
+- Nome: ${patientContext.name}
+- Diagnóstico Principal: ${patientContext.primaryDiagnosis || 'Não especificado'}
+- Comorbidades: ${patientContext.comorbidities?.join(', ') || 'Nenhuma identificada'}
+- Idade: ${patientContext.age || 'Não informada'}
+- Problemas Apresentados: ${patientContext.presentingProblems?.join(', ') || 'Não especificados'}
+- Tratamentos Anteriores: ${patientContext.previousTreatments?.join(', ') || 'Nenhum relatado'}
+- Preferências/Contexto: ${patientContext.preferences || 'Não informado'}
+
+**TAREFA:**
+Realize uma busca profunda e recomende 3-5 protocolos/guidelines mais adequados para este paciente.
+
+Para cada protocolo, forneça:
+1. Nome completo do protocolo
+2. Autores principais
+3. Nível de evidência (forte/moderado/emergente)
+4. Por que é indicado para ESTE paciente especificamente
+5. Componentes-chave do tratamento
+6. Duração estimada
+7. Referência bibliográfica
+
+**PRIORIZE:**
+- Protocolos transdiagnósticos quando apropriado (UP, PBT)
+- Protocolos específicos para diagnóstico principal
+- Evidências recentes (últimos 10 anos)
+- Manuais disponíveis em português ou inglês`;
+
+  try {
+    const result = await genAI.models.generateContent({
+      model: RATES.DEEP,
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: protocolSchema,
+        safetySettings: SAFETY_SETTINGS_CLINICAL as any
+      }
+    });
+
+    return JSON.parse(result.text || '{}');
+  } catch (error) {
+    console.error("Error recommending protocols:", error);
+    throw error;
+  }
+};
+
+// ====== ANÁLISE CLÍNICA COM MÚLTIPLOS PDFs ======
+export const generateClinicalAnalysisMultiPdf = async (context: {
+  patientName: string;
+  sessionsCompleted: number;
+  currentPhase: string;
+  progress: string;
+  recentChanges: string;
+  currentPlan: any;
+  pdfContents?: Array<{ name: string; base64: string }>; // Múltiplos PDFs
+  protocolRecommendations?: any; // Resultado do Deep Research
+}) => {
+  const genAI = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY || "" });
+
+  const clinicalAnalysisSchema: Schema = {
+    type: Type.OBJECT,
+    properties: {
+      pbeTriadAnalysis: {
+        type: Type.OBJECT,
+        properties: {
+          evidenceUsed: { type: Type.STRING },
+          expertiseApplied: { type: Type.STRING },
+          patientContextIntegration: { type: Type.STRING }
+        }
+      },
+      introduction: { type: Type.STRING },
+      synthesis: { type: Type.STRING },
+      protectionFactors: { type: Type.ARRAY, items: { type: Type.STRING } },
+      riskFactors: { type: Type.ARRAY, items: { type: Type.STRING } },
+      recommendation: { type: Type.STRING },
+      recommendationText: { type: Type.STRING },
+      sessionAdjustments: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            sessionNumber: { type: Type.NUMBER },
+            focusPrincipal: { type: Type.STRING },
+            objetivos: { type: Type.ARRAY, items: { type: Type.STRING } },
+            estrategias: { type: Type.ARRAY, items: { type: Type.STRING } },
+            protocolReference: { type: Type.STRING }
+          }
+        }
+      },
+      conclusion: { type: Type.STRING },
+      references: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            citation: { type: Type.STRING },
+            description: { type: Type.STRING }
+          }
+        }
+      }
+    },
+    required: ["pbeTriadAnalysis", "introduction", "synthesis", "protectionFactors", "riskFactors", "recommendation", "recommendationText", "conclusion", "references"]
+  };
+
+  const pdfNamesText = context.pdfContents?.length
+    ? `\n**PROTOCOLOS/GUIDELINES FORNECIDOS:** ${context.pdfContents.map(p => p.name).join(', ')}`
+    : '';
+
+  const researchText = context.protocolRecommendations
+    ? `\n**PESQUISA PRÉVIA DE PROTOCOLOS:**\n${JSON.stringify(context.protocolRecommendations, null, 2)}`
+    : '';
+
+  const prompt = `Você é um supervisor clínico experiente aplicando a **Tríade da Prática Baseada em Evidências (PBE)**.
+
+**TRÍADE PBE:**
+1. **Evidência**: Use os protocolos/guidelines fornecidos e a pesquisa prévia
+2. **Expertise**: Aplique seu conhecimento clínico para adaptar
+3. **Paciente**: Considere o contexto individual
+
+**CONTEXTO DO PACIENTE:**
+- Nome: ${context.patientName}
+- Sessões realizadas: ${context.sessionsCompleted}
+- Fase atual: ${context.currentPhase}
+- Progresso: ${context.progress}
+- Mudanças recentes: ${context.recentChanges}
+${pdfNamesText}
+${researchText}
+
+**PLANO ATUAL:**
+${JSON.stringify(context.currentPlan, null, 2)}
+
+**TAREFA:**
+Gere uma análise clínica fundamentada na tríade PBE. Inicie explicitando como você integrou:
+- As evidências dos protocolos fornecidos
+- Sua expertise clínica
+- O contexto único deste paciente
+
+Continue com a análise completa seguindo a estrutura padrão.`;
+
+  try {
+    // Build content parts
+    const parts: any[] = [{ text: prompt }];
+
+    // Add all PDFs as inline data
+    if (context.pdfContents?.length) {
+      for (const pdf of context.pdfContents) {
+        parts.push({
+          inlineData: { data: pdf.base64, mimeType: "application/pdf" }
+        });
+      }
+    }
+
+    const result = await genAI.models.generateContent({
+      model: RATES.DEEP,
+      contents: [{ role: "user", parts }],
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: clinicalAnalysisSchema,
+        safetySettings: SAFETY_SETTINGS_CLINICAL as any
+      }
+    });
+
+    const parsed = JSON.parse(result.text || '{}');
+    return {
+      id: `analysis_${Date.now()}`,
+      generatedAt: new Date().toISOString(),
+      ...parsed
+    };
+  } catch (error) {
+    console.error("Error generating clinical analysis with PDFs:", error);
     throw error;
   }
 };

@@ -10,6 +10,44 @@ export interface Patient {
     phone?: string;
     createdAt: string;
 
+    // Status management
+    status: 'ativo' | 'inativo';
+    inactivationDate?: string;
+    inactivationReason?: 'alta' | 'abandono' | 'transferencia' | 'outro';
+    inactivationNotes?: string;
+
+    // Schedule information
+    schedule?: {
+        dayOfWeek: 0 | 1 | 2 | 3 | 4 | 5 | 6; // 0 = Domingo, 1 = Segunda, etc.
+        time: string; // "14:00"
+        frequency: 'semanal' | 'quinzenal' | 'mensal';
+    };
+
+    // Financial information
+    billing?: {
+        paymentType: 'particular' | 'convenio' | 'pacote';
+        particularMode?: 'mensal' | 'avulsa'; // Para particulares
+        sessionValue: number; // Valor da sessão em R$
+        insurance?: {
+            name: string; // Ex: "FUNSERV", "GAMA", "DANAMED"
+            planCode?: string;
+            reimbursementDays: number; // Dias para receber (ex: 60)
+            billingType: 'por_guia' | 'mensal'; // FUNSERV=por_guia, GAMA/DANAMED=mensal
+            issPercent?: number; // ISS - FUNSERV 2%
+            irrfPercent?: number; // IRRF - 6% para todos
+        };
+        package?: {
+            totalSessions: number;
+            usedSessions: number;
+            packageValue: number;
+            expiresAt?: string;
+        };
+    };
+    // Payment history
+    paymentRecords?: PaymentRecord[];
+    // Scheduled sessions (for attendance tracking)
+    scheduledSessions?: ScheduledSession[];
+
     // Diagnosis for hierarchical knowledge base
     primaryDisorder?: 'panic' | 'depression' | 'ocd' | 'gad' | 'social_anxiety' | 'ptsd' | 'other';
     comorbidities?: string[];
@@ -19,6 +57,32 @@ export interface Patient {
 
     // Eells Model Data
     eellsData?: EellsData;
+}
+
+// Scheduled session with attendance tracking
+export interface ScheduledSession {
+    id: string;
+    scheduledDate: string; // ISO date
+    scheduledTime: string; // HH:MM
+    status: 'agendada' | 'presente' | 'falta' | 'remarcada' | 'cancelada';
+    attendanceConfirmedAt?: string;
+    rescheduledTo?: string; // New date if rescheduled
+    paymentId?: string; // Link to payment record
+    notes?: string;
+    absenceReason?: string;
+}
+
+// Financial payment record
+export interface PaymentRecord {
+    id: string;
+    sessionDate: string;
+    amount: number;
+    status: 'pendente' | 'pago' | 'a_receber'; // a_receber = convênio
+    paymentDate?: string;
+    expectedDate?: string; // Para convênios
+    method?: 'pix' | 'dinheiro' | 'cartao' | 'convenio' | 'pacote';
+    notes?: string;
+    sessionId?: string; // Link to scheduled session
 }
 
 export interface ClinicalRecords {

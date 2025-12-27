@@ -88,10 +88,16 @@ const CustomPBTNode = ({ data }: NodeProps) => {
   const roundedClass = isRounded ? 'rounded-2xl' : 'rounded-none';
   const showCategoryBadge = data.showCategoryBadge;
 
+  // AUTO-FIT: Calculate width based on label length
+  // Approximate: ~8px per character, min 100px, max 220px
+  const labelLength = (data.label || '').length;
+  const calculatedWidth = Math.min(220, Math.max(100, labelLength * 8 + 40));
+
   return (
     <div
-      className="relative group min-w-[140px] max-w-[180px]"
+      className="relative group"
       style={{
+        width: calculatedWidth,
         filter: isTarget ? `drop-shadow(0 0 15px #facc15)` : `drop-shadow(0 0 10px ${categoryStyle.color}20)`
       }}
     >
@@ -100,14 +106,14 @@ const CustomPBTNode = ({ data }: NodeProps) => {
         position={Position.Top}
         id="top"
         isConnectable={true}
-        className="!w-[90%] !h-5 !bg-transparent !opacity-100 !-top-4 !border-none !rounded z-50 cursor-crosshair"
+        className="!w-[90%] !h-5 !bg-transparent !opacity-100 !-top-1 !border-none !rounded z-50 cursor-crosshair"
       />
       <Handle
         type="target"
         position={Position.Top}
         id="top-target"
         isConnectable={true}
-        className="!w-[90%] !h-5 !bg-transparent !opacity-100 !-top-4 !border-none !rounded z-50 cursor-crosshair"
+        className="!w-[90%] !h-5 !bg-transparent !opacity-100 !-top-1 !border-none !rounded z-50 cursor-crosshair"
         style={{ left: '5%' }}
       />
       <Handle
@@ -115,14 +121,14 @@ const CustomPBTNode = ({ data }: NodeProps) => {
         position={Position.Right}
         id="right"
         isConnectable={true}
-        className="!w-5 !h-[90%] !bg-transparent !opacity-100 !-right-4 !border-none !rounded z-50 cursor-crosshair"
+        className="!w-5 !h-[90%] !bg-transparent !opacity-100 !-right-1 !border-none !rounded z-50 cursor-crosshair"
       />
       <Handle
         type="target"
         position={Position.Right}
         id="right-target"
         isConnectable={true}
-        className="!w-5 !h-[90%] !bg-transparent !opacity-100 !-right-4 !border-none !rounded z-50 cursor-crosshair"
+        className="!w-5 !h-[90%] !bg-transparent !opacity-100 !-right-1 !border-none !rounded z-50 cursor-crosshair"
         style={{ top: '5%' }}
       />
       <Handle
@@ -130,14 +136,14 @@ const CustomPBTNode = ({ data }: NodeProps) => {
         position={Position.Left}
         id="left"
         isConnectable={true}
-        className="!w-5 !h-[90%] !bg-transparent !opacity-100 !-left-4 !border-none !rounded z-50 cursor-crosshair"
+        className="!w-5 !h-[90%] !bg-transparent !opacity-100 !-left-1 !border-none !rounded z-50 cursor-crosshair"
       />
       <Handle
         type="target"
         position={Position.Left}
         id="left-target"
         isConnectable={true}
-        className="!w-5 !h-[90%] !bg-transparent !opacity-100 !-left-4 !border-none !rounded z-50 cursor-crosshair"
+        className="!w-5 !h-[90%] !bg-transparent !opacity-100 !-left-1 !border-none !rounded z-50 cursor-crosshair"
         style={{ top: '5%' }}
       />
 
@@ -193,14 +199,14 @@ const CustomPBTNode = ({ data }: NodeProps) => {
         position={Position.Bottom}
         id="bottom"
         isConnectable={true}
-        className="!w-[90%] !h-5 !bg-transparent !opacity-100 !-bottom-4 !border-none !rounded z-50 cursor-crosshair"
+        className="!w-[90%] !h-5 !bg-transparent !opacity-100 !-bottom-1 !border-none !rounded z-50 cursor-crosshair"
       />
       <Handle
         type="target"
         position={Position.Bottom}
         id="bottom-target"
         isConnectable={true}
-        className="!w-[90%] !h-5 !bg-transparent !opacity-100 !-bottom-4 !border-none !rounded z-50 cursor-crosshair"
+        className="!w-[90%] !h-5 !bg-transparent !opacity-100 !-bottom-1 !border-none !rounded z-50 cursor-crosshair"
         style={{ left: '5%' }}
       />
     </div >

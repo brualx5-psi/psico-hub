@@ -1,14 +1,17 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Zap, Save, Loader2, Bot, User, FileText, RefreshCw, Mic, MicOff, Calendar, ListChecks, AlertTriangle, Book, Activity } from 'lucide-react';
-import { getCoPilotSuggestion, summarizeChatToSoap, generateSessionScript, consultCoreLibrary, generatePostSessionAnalysis, monitorActiveProcesses } from '../lib/gemini';
+import { Send, Zap, Save, Loader2, Bot, User, FileText, RefreshCw, Mic, MicOff, Calendar, AlertTriangle, Book, Check, RotateCcw, Plus, Activity } from 'lucide-react';
+import { getCoPilotSuggestion, summarizeChatToSoap, generateSessionScript, consultCoreLibrary, generatePostSessionAnalysis, monitorActiveProcesses, analyzeSessionDemand, checkScriptProgress, SessionAdaptation, ScriptItem, ActiveProcess } from '../lib/gemini';
 import { generateSOAPPreview } from '../lib/soap-preview';
 import { usePatients } from '../context/PatientContext';
+import { ProcessNetworkMini } from './ProcessNetworkMini';
+import { ScriptProgressTracker } from './ScriptProgressTracker';
 
 interface Message {
     id: string;
     role: 'user' | 'ai';
     text: string;
     timestamp: Date;
+    adaptation?: SessionAdaptation; // For adaptive session suggestions
 }
 
 interface CoPilotChatProps {
@@ -26,8 +29,9 @@ export const CoPilotChat: React.FC<CoPilotChatProps> = ({ onSessionEnd, onAnalys
     const [isGeneratingPreview, setIsGeneratingPreview] = useState(false);
     const [lastPreviewCount, setLastPreviewCount] = useState(0);
 
-    // Radar PBT (Live)
-    const [activeProcesses, setActiveProcesses] = useState<any[]>([]);
+    // Radar PBT (Live) - Enhanced with typing
+    const [activeProcesses, setActiveProcesses] = useState<ActiveProcess[]>([]);
+    const [isAnalyzingProcesses, setIsAnalyzingProcesses] = useState(false);
 
     // Voice recording states
     const [isRecording, setIsRecording] = useState(false);
@@ -35,13 +39,25 @@ export const CoPilotChat: React.FC<CoPilotChatProps> = ({ onSessionEnd, onAnalys
     const [sessionStartTime, setSessionStartTime] = useState<Date | null>(null);
     const [interimTranscript, setInterimTranscript] = useState('');
 
-    // Session Script (GPS Terapêutico)
+    // Session Script (GPS Terapêutico) - Now structured
     const [sessionScript, setSessionScript] = useState<string | null>(null);
+    const [scriptItems, setScriptItems] = useState<ScriptItem[]>([]);
+    const [isCheckingProgress, setIsCheckingProgress] = useState(false);
     const [isCrisisMode, setIsCrisisMode] = useState(false);
     const [isGeneratingScript, setIsGeneratingScript] = useState(false);
 
     // Library Consultant
     const [isConsultingLibrary, setIsConsultingLibrary] = useState(false);
+
+    // Pending Adaptation (waiting for user decision)
+    const [pendingAdaptation, setPendingAdaptation] = useState<SessionAdaptation | null>(null);
+    const [isAnalyzingDemand, setIsAnalyzingDemand] = useState(false);
+
+    // Command Center Tabs
+    type CommandTab = 'rede' | 'roteiro' | 'soap';
+    const [activeCommandTab, setActiveCommandTab] = useState<CommandTab>('roteiro');
+    const [tabNotifications, setTabNotifications] = useState<Record<CommandTab, boolean>>({ rede: false, roteiro: false, soap: false });
+    const [lastSeenData, setLastSeenData] = useState<{ rede: number; roteiro: number; soap: number }>({ rede: 0, roteiro: 0, soap: 0 });
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const recognitionRef = useRef<any>(null);
@@ -52,6 +68,29 @@ export const CoPilotChat: React.FC<CoPilotChatProps> = ({ onSessionEnd, onAnalys
     };
 
     useEffect(scrollToBottom, [messages]);
+
+    // Detect changes on Rede tab when not active
+    useEffect(() => {
+        if (activeCommandTab !== 'rede' && activeProcesses.length !== lastSeenData.rede) {
+            setTabNotifications(prev => ({ ...prev, rede: true }));
+        }
+    }, [activeProcesses, activeCommandTab, lastSeenData.rede]);
+
+    // Detect changes on Roteiro tab when not active
+    useEffect(() => {
+        const completedCount = scriptItems.filter(i => i.completed).length;
+        if (activeCommandTab !== 'roteiro' && completedCount !== lastSeenData.roteiro) {
+            setTabNotifications(prev => ({ ...prev, roteiro: true }));
+        }
+    }, [scriptItems, activeCommandTab, lastSeenData.roteiro]);
+
+    // Detect changes on SOAP tab when not active
+    useEffect(() => {
+        const hasSoap = soapPreview ? 1 : 0;
+        if (activeCommandTab !== 'soap' && hasSoap !== lastSeenData.soap) {
+            setTabNotifications(prev => ({ ...prev, soap: true }));
+        }
+    }, [soapPreview, activeCommandTab, lastSeenData.soap]);
 
     // ... (rest of useEffects)
 
@@ -188,6 +227,10 @@ export const CoPilotChat: React.FC<CoPilotChatProps> = ({ onSessionEnd, onAnalys
             setSessionScript(script);
             setIsCrisisMode(isCrisis);
 
+            // Parse script into structured items
+            const parsedItems = parseScriptToItems(script);
+            setScriptItems(parsedItems);
+
             // Add script as first message
             const scriptMsg: Message = {
                 id: crypto.randomUUID(),
@@ -218,6 +261,52 @@ export const CoPilotChat: React.FC<CoPilotChatProps> = ({ onSessionEnd, onAnalys
         }
     };
 
+    // Handle accepting the adaptation suggestion
+    const handleAcceptAdaptation = async () => {
+        if (!pendingAdaptation || !currentPatient) return;
+
+        setIsGeneratingScript(true);
+        try {
+            if (pendingAdaptation.action === 'substituir' && pendingAdaptation.newDemand) {
+                // Generate new script for new demand
+                await generateScript(true, pendingAdaptation.newDemand);
+                const confirmMsg: Message = {
+                    id: crypto.randomUUID(),
+                    role: 'ai',
+                    text: `✅ Roteiro atualizado! Foco agora: **${pendingAdaptation.newDemand}**`,
+                    timestamp: new Date()
+                };
+                setMessages(prev => [...prev, confirmMsg]);
+            } else if (pendingAdaptation.action === 'adicionar' && pendingAdaptation.suggestedAddition) {
+                // Add to existing script
+                const additionScript = `\n\n📍 **ADICIONADO AO ROTEIRO:**\n- [ ] ${pendingAdaptation.suggestedAddition}`;
+                setSessionScript(prev => prev + additionScript);
+                const confirmMsg: Message = {
+                    id: crypto.randomUUID(),
+                    role: 'ai',
+                    text: `✅ Adicionado ao roteiro: **${pendingAdaptation.suggestedAddition}**`,
+                    timestamp: new Date()
+                };
+                setMessages(prev => [...prev, confirmMsg]);
+            }
+        } finally {
+            setPendingAdaptation(null);
+            setIsGeneratingScript(false);
+        }
+    };
+
+    // Handle rejecting the adaptation (continue with original)
+    const handleRejectAdaptation = () => {
+        const confirmMsg: Message = {
+            id: crypto.randomUUID(),
+            role: 'ai',
+            text: `👍 Entendido! Vamos continuar com o roteiro original.`,
+            timestamp: new Date()
+        };
+        setMessages(prev => [...prev, confirmMsg]);
+        setPendingAdaptation(null);
+    };
+
     const toggleRecording = () => {
         if (!recognitionRef.current) {
             alert('Reconhecimento de voz não disponível neste navegador. Use Chrome ou Edge.');
@@ -240,16 +329,85 @@ export const CoPilotChat: React.FC<CoPilotChatProps> = ({ onSessionEnd, onAnalys
         }
     };
 
-    // Auto-gerar preview a cada 4 mensagens
+    // Helper function to parse script text into structured items
+    const parseScriptToItems = (scriptText: string): ScriptItem[] => {
+        const lines = scriptText.split('\n');
+        const items: ScriptItem[] = [];
+
+        lines.forEach((line, idx) => {
+            const trimmed = line.trim();
+            // Match lines starting with - [ ] or - [x]
+            if (trimmed.startsWith('- [ ]') || trimmed.startsWith('- [x]')) {
+                const text = trimmed.replace(/^- \[[ x]\]\s*/, '').trim();
+                if (text) {
+                    items.push({
+                        id: `item_${idx}`,
+                        text: text,
+                        completed: trimmed.startsWith('- [x]'),
+                        priority: text.toLowerCase().includes('urgent') || text.toLowerCase().includes('crise') ? 'high' : 'normal'
+                    });
+                }
+            }
+        });
+
+        return items;
+    };
+
+    // Auto-gerar preview + check progress a cada 4 mensagens
     useEffect(() => {
         const shouldGenerate = messages.length > 0 &&
             messages.length >= lastPreviewCount + 4 &&
             !isLoading;
 
         if (shouldGenerate) {
-            generatePreview();
+            generatePreviewAndProgress();
         }
     }, [messages.length, isLoading]);
+
+    const generatePreviewAndProgress = async () => {
+        // Run all analyses in parallel (using Pro model)
+        setIsGeneratingPreview(true);
+        setIsCheckingProgress(true);
+        setIsAnalyzingProcesses(true);
+
+        try {
+            const chatHistory = messages.map(m => `${m.role === 'user' ? 'Terapeuta' : 'Supervisor'}: ${m.text}`).join('\n');
+            const existingPBTNodes = currentPatient?.clinicalRecords?.caseFormulation?.pbtData?.nodes || [];
+
+            const [preview, progressResult, processesResult] = await Promise.all([
+                generateSOAPPreview(messages, currentPatient),
+                scriptItems.length > 0
+                    ? checkScriptProgress(chatHistory, scriptItems.map(i => i.text), currentPatient?.name || 'Paciente')
+                    : Promise.resolve({ completedItems: [], reasoning: '' }),
+                monitorActiveProcesses(chatHistory, existingPBTNodes)
+            ]);
+
+            setSOAPPreview(preview);
+            setLastPreviewCount(messages.length);
+
+            // Update script items with completed status
+            if (progressResult.completedItems.length > 0) {
+                setScriptItems(prev => prev.map((item, idx) => ({
+                    ...item,
+                    completed: progressResult.completedItems.includes(idx) || item.completed
+                })));
+            }
+
+            // Update active processes
+            if (processesResult?.active_nodes) {
+                setActiveProcesses(processesResult.active_nodes);
+                if (onAnalysisUpdate) {
+                    onAnalysisUpdate({ active_nodes: processesResult.active_nodes });
+                }
+            }
+        } catch (error) {
+            console.error('Error generating preview/progress:', error);
+        } finally {
+            setIsGeneratingPreview(false);
+            setIsCheckingProgress(false);
+            setIsAnalyzingProcesses(false);
+        }
+    };
 
     const generatePreview = async () => {
         setIsGeneratingPreview(true);
@@ -276,20 +434,51 @@ export const CoPilotChat: React.FC<CoPilotChatProps> = ({ onSessionEnd, onAnalys
         try {
             const context = messages.slice(-5).map(m => `${m.role === 'user' ? 'Terapeuta' : 'Supervisor'}: ${m.text}`).join('\n');
 
-            // Run Copilot + Live PBT Radar in parallel
-            const [suggestion, radarData] = await Promise.all([
-                getCoPilotSuggestion(userMsg.text, context, currentPatient),
-                monitorActiveProcesses(userMsg.text) // Analyze just the latest input or short context
-            ]);
+            // Run Copilot with Flash model (quick response)
+            const suggestion = await getCoPilotSuggestion(userMsg.text, context, currentPatient);
 
             const aiMsg: Message = { id: crypto.randomUUID(), role: 'ai', text: suggestion, timestamp: new Date() };
             setMessages(prev => [...prev, aiMsg]);
 
-            // Update Radar UI
-            if (radarData?.active_nodes) {
-                setActiveProcesses(radarData.active_nodes);
-                if (onAnalysisUpdate) {
-                    onAnalysisUpdate({ active_nodes: radarData.active_nodes });
+            // Note: PBT Radar now runs in background every 4 messages via generatePreviewAndProgress
+
+            // ADAPTIVE SESSION: Analyze demand after first patient update (messages count ~2-3)
+            if (sessionScript && messages.length <= 3 && currentPatient) {
+                setIsAnalyzingDemand(true);
+                try {
+                    const treatmentPlan = currentPatient.clinicalRecords?.treatmentPlan?.goals?.join(', ') || 'Plano a definir';
+                    const adaptation = await analyzeSessionDemand(
+                        userMsg.text,
+                        sessionScript,
+                        treatmentPlan,
+                        currentPatient.name
+                    );
+
+                    if (adaptation.action !== 'manter') {
+                        // Show adaptation suggestion with action buttons
+                        const adaptMsg: Message = {
+                            id: crypto.randomUUID(),
+                            role: 'ai',
+                            text: `🎯 **SUGESTÃO DE ADAPTAÇÃO**\n\n${adaptation.messageToTherapist}\n\n_${adaptation.reasoning}_`,
+                            timestamp: new Date(),
+                            adaptation: adaptation
+                        };
+                        setMessages(prev => [...prev, adaptMsg]);
+                        setPendingAdaptation(adaptation);
+                    } else {
+                        // Manter - just confirm
+                        const confirmMsg: Message = {
+                            id: crypto.randomUUID(),
+                            role: 'ai',
+                            text: `✅ ${adaptation.messageToTherapist}`,
+                            timestamp: new Date()
+                        };
+                        setMessages(prev => [...prev, confirmMsg]);
+                    }
+                } catch (adaptError) {
+                    console.error("Adaptation analysis error:", adaptError);
+                } finally {
+                    setIsAnalyzingDemand(false);
                 }
             }
         } catch (error) {
@@ -386,7 +575,7 @@ export const CoPilotChat: React.FC<CoPilotChatProps> = ({ onSessionEnd, onAnalys
     };
 
     return (
-        <div className="flex gap-4 h-[calc(100vh-8rem)]">
+        <div className="flex gap-3 h-[calc(100vh-3rem)]">
             {/* LEFT: CHAT */}
             <div className="flex-1 flex flex-col bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
                 <div className="p-4 border-b border-gray-200 bg-gradient-to-r from-indigo-50 to-white flex items-center justify-between">
@@ -420,57 +609,46 @@ export const CoPilotChat: React.FC<CoPilotChatProps> = ({ onSessionEnd, onAnalys
                         {!sessionStartTime && (
                             <button
                                 onClick={handleStartSession}
-                                className="px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium flex items-center gap-2 transition-all shadow-sm"
+                                className="px-2 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all"
                             >
-                                <Calendar className="w-4 h-4" />
-                                Iniciar Sessão
+                                <Calendar className="w-3.5 h-3.5" />
+                                Iniciar
                             </button>
                         )}
                         <button
                             onClick={toggleRecording}
                             disabled={isFinalizing}
-                            className={`px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-all shadow-sm ${isRecording
+                            className={`px-2 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all ${isRecording
                                 ? 'bg-red-600 hover:bg-red-500 text-white animate-pulse'
-                                : 'bg-gray-600 hover:bg-gray-500 text-white'
+                                : 'bg-gray-500 hover:bg-gray-400 text-white'
                                 }`}
-                            title={isRecording ? 'Clique para parar de gravar' : 'Clique para começar a gravar'}
+                            title={isRecording ? 'Parar' : 'Gravar'}
                         >
-                            {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-                            {isRecording ? 'Gravando' : 'Microfone'}
+                            {isRecording ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
                         </button>
                         {sessionStartTime && (
                             <>
                                 <button
                                     onClick={handleCrisisMode}
                                     disabled={isGeneratingScript || isFinalizing}
-                                    className={`px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-all shadow-sm ${isCrisisMode
+                                    className={`px-2 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all ${isCrisisMode
                                         ? 'bg-red-600 hover:bg-red-500 text-white'
                                         : 'bg-amber-500 hover:bg-amber-400 text-white'
                                         }`}
-                                    title="Informar situação de crise e recalcular roteiro"
+                                    title="Mudar demanda da sessão"
                                 >
-                                    <AlertTriangle className="w-4 h-4" />
-                                    {isCrisisMode ? 'Em Crise' : 'Mudar Demanda'}
-                                </button>
-
-                                <button
-                                    onClick={handleConsultLibrary}
-                                    disabled={isConsultingLibrary || isFinalizing}
-                                    className="px-3 py-2 bg-indigo-500 hover:bg-indigo-400 text-white rounded-lg text-sm font-medium flex items-center gap-2 transition-all shadow-sm"
-                                    title="Consultar Manual Socrático sobre o contexto atual"
-                                >
-                                    {isConsultingLibrary ? <Loader2 className="w-4 h-4 animate-spin" /> : <Book className="w-4 h-4" />}
-                                    Manual Socrático
+                                    <AlertTriangle className="w-3.5 h-3.5" />
+                                    Mudar
                                 </button>
                             </>
                         )}
                         <button
                             onClick={handleFinalizeSession}
                             disabled={isFinalizing || messages.length === 0}
-                            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold text-sm flex items-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold text-xs flex items-center gap-1.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                            {isFinalizing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                            {isFinalizing ? "GERANDO..." : "ENCERRAR"}
+                            {isFinalizing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                            {isFinalizing ? "..." : "Encerrar"}
                         </button>
                     </div>
                 </div>
@@ -493,7 +671,73 @@ export const CoPilotChat: React.FC<CoPilotChatProps> = ({ onSessionEnd, onAnalys
                                     ? 'bg-white text-gray-800 border border-gray-100 rounded-tr-none'
                                     : 'bg-indigo-600 text-white rounded-tl-none shadow-md'
                                     }`}>
-                                    {msg.text}
+                                    <div className="whitespace-pre-wrap">
+                                        {msg.text.split('\n').map((line, i) => {
+                                            // Render checkboxes
+                                            if (line.trim().startsWith('- [ ]')) {
+                                                const text = line.replace('- [ ]', '').trim();
+                                                return (
+                                                    <div key={i} className="flex items-start gap-2 my-1">
+                                                        <input type="checkbox" className="mt-1 rounded" disabled />
+                                                        <span>{text}</span>
+                                                    </div>
+                                                );
+                                            }
+                                            // Render bold text
+                                            const boldRegex = /\*\*(.*?)\*\*/g;
+                                            const parts = line.split(boldRegex);
+                                            return (
+                                                <div key={i}>
+                                                    {parts.map((part, j) =>
+                                                        j % 2 === 1 ? <strong key={j}>{part}</strong> : part
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                    {/* Action Buttons for Adaptation Suggestions */}
+                                    {msg.adaptation && pendingAdaptation && msg.adaptation === pendingAdaptation && (
+                                        <div className="mt-3 flex gap-2 pt-3 border-t border-white/20">
+                                            {msg.adaptation.action === 'substituir' && (
+                                                <>
+                                                    <button
+                                                        onClick={handleAcceptAdaptation}
+                                                        disabled={isGeneratingScript}
+                                                        className="flex-1 px-3 py-2 bg-amber-500 hover:bg-amber-400 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1 transition-all disabled:opacity-50"
+                                                    >
+                                                        {isGeneratingScript ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />}
+                                                        Mudar Foco
+                                                    </button>
+                                                    <button
+                                                        onClick={handleRejectAdaptation}
+                                                        className="flex-1 px-3 py-2 bg-white/20 hover:bg-white/30 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1 transition-all"
+                                                    >
+                                                        <Check className="w-3 h-3" />
+                                                        Manter Roteiro
+                                                    </button>
+                                                </>
+                                            )}
+                                            {msg.adaptation.action === 'adicionar' && (
+                                                <>
+                                                    <button
+                                                        onClick={handleAcceptAdaptation}
+                                                        disabled={isGeneratingScript}
+                                                        className="flex-1 px-3 py-2 bg-emerald-500 hover:bg-emerald-400 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1 transition-all disabled:opacity-50"
+                                                    >
+                                                        {isGeneratingScript ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+                                                        Adicionar
+                                                    </button>
+                                                    <button
+                                                        onClick={handleRejectAdaptation}
+                                                        className="flex-1 px-3 py-2 bg-white/20 hover:bg-white/30 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1 transition-all"
+                                                    >
+                                                        <Check className="w-3 h-3" />
+                                                        Ignorar
+                                                    </button>
+                                                </>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </div>
@@ -542,86 +786,113 @@ export const CoPilotChat: React.FC<CoPilotChatProps> = ({ onSessionEnd, onAnalys
                 </div>
             </div>
 
-            {/* RIGHT: SOAP PREVIEW */}
-            <div className="w-96 flex flex-col bg-gradient-to-br from-purple-50 to-indigo-50 rounded-xl border-2 border-purple-200 shadow-lg overflow-hidden">
-                <div className="p-4 border-b border-purple-200 bg-gradient-to-r from-purple-600 to-indigo-600">
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                            <FileText className="w-5 h-5 text-white" />
-                            <h3 className="font-bold text-white">Preview SOAP</h3>
-                        </div>
+            {/* RIGHT: COMMAND CENTER WITH TABS */}
+            <div className="w-[480px] flex-shrink-0 flex flex-col bg-white rounded-xl border border-gray-200 shadow-lg overflow-hidden">
+                {/* Tab Headers */}
+                <div className="flex border-b border-gray-200">
+                    {[
+                        { id: 'roteiro' as CommandTab, label: 'Roteiro GPS', icon: '🧭', color: 'emerald' },
+                        { id: 'soap' as CommandTab, label: 'SOAP', icon: '📋', color: 'purple' },
+                        { id: 'rede' as CommandTab, label: 'Rede PBT', icon: '🧠', color: 'teal' }
+                    ].map((tab) => (
                         <button
-                            onClick={generatePreview}
-                            disabled={isGeneratingPreview || messages.length === 0}
-                            className="p-2 bg-white/20 hover:bg-white/30 rounded-lg transition-colors disabled:opacity-50"
-                            title="Atualizar preview"
+                            key={tab.id}
+                            onClick={() => {
+                                setActiveCommandTab(tab.id);
+                                setTabNotifications(prev => ({ ...prev, [tab.id]: false }));
+                                setLastSeenData(prev => ({
+                                    ...prev,
+                                    [tab.id]: tab.id === 'rede' ? activeProcesses.length
+                                        : tab.id === 'roteiro' ? scriptItems.filter(i => i.completed).length
+                                            : soapPreview ? 1 : 0
+                                }));
+                            }}
+                            className={`flex-1 px-2 py-2.5 text-xs font-bold flex items-center justify-center gap-1.5 relative transition-all ${activeCommandTab === tab.id
+                                ? `bg-${tab.color}-50 text-${tab.color}-700 border-b-2 border-${tab.color}-500`
+                                : 'text-gray-500 hover:bg-gray-50'
+                                }`}
                         >
-                            <RefreshCw className={`w-4 h-4 text-white ${isGeneratingPreview ? 'animate-spin' : ''}`} />
+                            <span>{tab.icon}</span>
+                            <span className="hidden sm:inline">{tab.label}</span>
+                            {tabNotifications[tab.id] && activeCommandTab !== tab.id && (
+                                <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse" />
+                            )}
                         </button>
-                    </div>
-                    <p className="text-xs text-purple-100 mt-1">
-                        {messages.length > 0 ? `${messages.length} mensagens • Atualiza a cada 4` : 'Aguardando mensagens...'}
-                    </p>
+                    ))}
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                    {!soapPreview && messages.length === 0 && (
-                        <div className="flex flex-col items-center justify-center h-full text-purple-400 text-center">
-                            <FileText className="w-12 h-12 mb-2 opacity-20" />
-                            <p className="text-sm">SOAP será gerado automaticamente conforme você digita</p>
+                {/* Tab Content */}
+                <div className="flex-1 overflow-hidden">
+                    {/* Rede PBT */}
+                    {activeCommandTab === 'rede' && (
+                        <div className="h-full">
+                            <ProcessNetworkMini
+                                activeProcesses={activeProcesses}
+                                isLoading={isAnalyzingProcesses}
+                            />
                         </div>
                     )}
 
-                    {isGeneratingPreview && (
-                        <div className="flex items-center justify-center h-full">
-                            <Loader2 className="w-8 h-8 text-purple-600 animate-spin" />
+                    {/* Roteiro GPS */}
+                    {activeCommandTab === 'roteiro' && (
+                        <div className="h-full">
+                            <ScriptProgressTracker
+                                scriptItems={scriptItems}
+                                isLoading={isCheckingProgress}
+                                onRefresh={() => generatePreviewAndProgress()}
+                            />
                         </div>
                     )}
 
-                    {soapPreview && !isGeneratingPreview && (
-                        <div className="space-y-3">
-                            {/* Subjetivo */}
-                            <div className="bg-white rounded-lg p-3 border-2 border-purple-200">
-                                <h4 className="font-bold text-purple-700 text-sm mb-1 flex items-center gap-1">
-                                    <User className="w-3 h-3" />
-                                    SUBJETIVO
-                                </h4>
-                                <p className="text-xs text-gray-700 whitespace-pre-wrap">
-                                    {soapPreview.queixa_principal || 'A definir...'}
-                                </p>
+                    {/* SOAP Preview */}
+                    {activeCommandTab === 'soap' && (
+                        <div className="h-full flex flex-col">
+                            <div className="p-2 border-b bg-gradient-to-r from-purple-600 to-indigo-600 flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                    <FileText className="w-4 h-4 text-white" />
+                                    <h4 className="text-sm font-bold text-white">SOAP PREVIEW</h4>
+                                </div>
+                                <button
+                                    onClick={generatePreview}
+                                    disabled={isGeneratingPreview || messages.length === 0}
+                                    className="p-1 hover:bg-white/20 rounded transition-colors disabled:opacity-50"
+                                    title="Atualizar preview"
+                                >
+                                    <RefreshCw className={`w-3.5 h-3.5 text-white ${isGeneratingPreview ? 'animate-spin' : ''}`} />
+                                </button>
                             </div>
-
-                            {/* Objetivo */}
-                            <div className="bg-white rounded-lg p-3 border-2 border-purple-200">
-                                <h4 className="font-bold text-purple-700 text-sm mb-1">OBJETIVO</h4>
-                                <p className="text-xs text-gray-700 whitespace-pre-wrap">
-                                    {soapPreview.objetivo || 'A definir...'}
-                                </p>
-                            </div>
-
-                            {/* Avaliação */}
-                            <div className="bg-white rounded-lg p-3 border-2 border-purple-200">
-                                <h4 className="font-bold text-purple-700 text-sm mb-1">AVALIAÇÃO</h4>
-                                <p className="text-xs text-gray-700 whitespace-pre-wrap">
-                                    {soapPreview.avaliacao || 'A definir...'}
-                                </p>
-                            </div>
-
-                            {/* Plano */}
-                            <div className="bg-white rounded-lg p-3 border-2 border-purple-200">
-                                <h4 className="font-bold text-purple-700 text-sm mb-1">PLANO</h4>
-                                <p className="text-xs text-gray-700 whitespace-pre-wrap">
-                                    {soapPreview.plano || 'A definir...'}
-                                </p>
+                            <div className="flex-1 overflow-y-auto p-3 bg-purple-50">
+                                {isGeneratingPreview ? (
+                                    <div className="h-full flex items-center justify-center">
+                                        <Loader2 className="w-6 h-6 text-purple-500 animate-spin" />
+                                    </div>
+                                ) : !soapPreview ? (
+                                    <div className="h-full flex items-center justify-center text-gray-400 text-sm">
+                                        <p>Aguardando sessão...</p>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-2">
+                                        <div className="bg-white rounded-lg p-3 border border-purple-200">
+                                            <span className="text-xs font-bold text-purple-600">S - Subjetivo</span>
+                                            <p className="text-sm text-gray-700 mt-1">{soapPreview.queixa_principal || 'A definir...'}</p>
+                                        </div>
+                                        <div className="bg-white rounded-lg p-3 border border-purple-200">
+                                            <span className="text-xs font-bold text-purple-600">O - Objetivo</span>
+                                            <p className="text-sm text-gray-700 mt-1">{soapPreview.objetivo || 'A definir...'}</p>
+                                        </div>
+                                        <div className="bg-white rounded-lg p-3 border border-purple-200">
+                                            <span className="text-xs font-bold text-purple-600">A - Avaliação</span>
+                                            <p className="text-sm text-gray-700 mt-1">{soapPreview.avaliacao || 'A definir...'}</p>
+                                        </div>
+                                        <div className="bg-white rounded-lg p-3 border border-purple-200">
+                                            <span className="text-xs font-bold text-purple-600">P - Plano</span>
+                                            <p className="text-sm text-gray-700 mt-1">{soapPreview.plano || 'A definir...'}</p>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     )}
-                </div>
-
-                <div className="p-3 border-t border-purple-200 bg-white">
-                    <p className="text-xs text-gray-500 text-center">
-                        💡 Preview automático. Clique "Encerrar" para versão final.
-                    </p>
                 </div>
             </div>
         </div>

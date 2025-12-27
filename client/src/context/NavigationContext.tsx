@@ -15,7 +15,10 @@ export type TabId =
     | 'copilot'
     | 'eells'
     | 'prontuario'
-    | 'library';
+    | 'library'
+    | 'financeiro'
+    | 'sessoes'
+    | 'homework';
 
 interface NavigationContextType {
     activeTab: TabId;

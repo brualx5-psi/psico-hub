@@ -1,708 +1,455 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState } from 'react';
 import { usePatients } from '../context/PatientContext';
 import {
-    Sparkles,
-    BookOpen,
-    FileText,
     Target,
-    Clock,
-    Loader2,
-    Upload,
-    CheckCircle2,
-    AlertCircle,
     ChevronDown,
     ChevronRight,
-    RefreshCw,
+    Sparkles,
+    Loader2,
+    FileText,
+    BookOpen,
+    AlertCircle,
+    Plus,
+    Edit2,
+    Trash2,
     Save,
-    Edit3,
-    Trash2
+    X,
+    FileUp
 } from 'lucide-react';
+import { recommendProtocols, generateClinicalAnalysisMultiPdf } from '../lib/gemini';
+import type { TreatmentPhase, TreatmentSession, ClinicalAnalysis } from '../types/treatment-plan';
 
-interface TreatmentPhase {
-    name: string;
-    sessions: string;
-    objectives: string[];
-    interventions: string[];
-    techniques: string[];
-}
-
-interface TreatmentPlan {
-    id: string;
-    createdAt: string;
-    updatedAt: string;
-    protocol: string;
-    totalSessions: string;
-    frequency: string;
-    phases: TreatmentPhase[];
-    dischargeCriteria: string[];
-    notes: string;
-}
-
-interface Suggestion {
-    type: 'guideline' | 'protocol' | 'gap' | 'approach';
-    title: string;
-    description: string;
-    source?: string;
-    selected?: boolean;
-}
-
-interface UploadedGuideline {
-    id: string;
-    name: string;
-    content: string; // Base64 or text extracted
-    type: 'pdf' | 'image';
-}
+const DEFAULT_PHASES: TreatmentPhase[] = [
+    {
+        id: 'phase1',
+        name: 'Aliança, avaliação e psicoeducação',
+        sessionRange: { start: 1, end: 4 },
+        sessions: [
+            { number: 1, objectives: ['Estabelecimento de aliança terapêutica', 'Mapeamento inicial'], strategies: 'Entrevista motivacional, mapeamento dos problemas, história de vida' },
+            { number: 2, objectives: ['Psicoeducação sobre ciclo de manutenção'], strategies: 'Explicação do ciclo de manutenção do sofrimento' },
+            { number: 3, objectives: ['Avaliação detalhada'], strategies: 'Análise funcional molar e episódica' },
+            { number: 4, objectives: ['Motivação e plano de mudança'], strategies: 'Técnicas de entrevista motivacional' }
+        ]
+    },
+    {
+        id: 'phase2',
+        name: 'Consciência emocional e regulação',
+        sessionRange: { start: 5, end: 8 },
+        sessions: [
+            { number: 5, objectives: ['Consciência emocional'], strategies: 'Mindfulness para emoções; rotulagem emocional' },
+            { number: 6, objectives: ['Relação pensamentos-emoções-comportamento'], strategies: 'Triângulo cognitivo-comportamental' },
+            { number: 7, objectives: ['Autorregulação'], strategies: 'Técnicas de aceitação' },
+            { number: 8, objectives: ['Manejo de recaídas'], strategies: 'Psicoeducação sobre recaída' }
+        ]
+    }
+];
 
 export const TreatmentPlanTab: React.FC = () => {
-    const { currentPatient, updatePatient } = usePatients();
+    const { currentPatient } = usePatients();
+    const [expandedPhases, setExpandedPhases] = useState<string[]>([]);
+    const [isGeneratingAnalysis, setIsGeneratingAnalysis] = useState(false);
+    const [currentAnalysis, setCurrentAnalysis] = useState<ClinicalAnalysis | null>(null);
+    const [showAnalysisModal, setShowAnalysisModal] = useState(false);
+    const [treatmentPlan, setTreatmentPlan] = useState<TreatmentPhase[]>(DEFAULT_PHASES);
+    const [editingPhaseId, setEditingPhaseId] = useState<string | null>(null);
+    const [editingSessionKey, setEditingSessionKey] = useState<string | null>(null);
+    const [showAddPhaseModal, setShowAddPhaseModal] = useState(false);
+    const [showAddSessionModal, setShowAddSessionModal] = useState<string | null>(null);
+    const [newPhaseName, setNewPhaseName] = useState('');
+    const [newSessionObjectives, setNewSessionObjectives] = useState('');
+    const [newSessionStrategies, setNewSessionStrategies] = useState('');
+    const [pdfList, setPdfList] = useState<Array<{ name: string; base64: string }>>([]);
+    const [isSearchingProtocols, setIsSearchingProtocols] = useState(false);
+    const [protocolRecommendations, setProtocolRecommendations] = useState<any>(null);
+    const [showRecommendationsModal, setShowRecommendationsModal] = useState(false);
 
-    // State
-    const [phase, setPhase] = useState<'suggestions' | 'generating' | 'review' | 'editing'>('suggestions');
-    const [isLoading, setIsLoading] = useState(false);
-    const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
-    const [currentPlan, setCurrentPlan] = useState<TreatmentPlan | null>(null);
-    const [expandedPhases, setExpandedPhases] = useState<Set<number>>(new Set([0, 1, 2]));
-    const [uploadedGuidelines, setUploadedGuidelines] = useState<UploadedGuideline[]>([]);
-    const [customFocus, setCustomFocus] = useState('');
-    const [isUploadingFile, setIsUploadingFile] = useState(false);
-    const [selectedLibraryProtocol, setSelectedLibraryProtocol] = useState('');
-
-    // Available protocols in /library folder
-    const libraryProtocols = [
-        { name: 'Terapia Baseada em Processos (CORE)', file: 'core/Aprendendo a terapia baseada em processos_pesquisavel.pdf' },
-        { name: 'Protocolo Unificado (Barlow)', file: 'AplicandoaTerapiaComportamentalDialéticaKellyKoerner.pdf' },
-        { name: 'ACT - Terapia de Aceitação e Compromisso', file: 'ACT_Terapia_de_aceitação_e_compromisso_2°_edição_Hayes.pdf' },
-        { name: 'DBT - Terapia Dialética Comportamental', file: 'Terapia_comportamental_dialética_na_prática_clínica_aplicações.pdf' },
-        { name: 'Prática Baseada em Evidências (Fundamentos)', file: 'Prática_baseada_em_evidências_em_psicologia_clínica_fundamentos.pdf' },
-        { name: 'Formulação de Caso (Eells)', file: 'Psychotherapy Case Formulation - Tracy Eells.pdf' },
-    ];
-
-    // File input ref
-    const fileInputRef = React.useRef<HTMLInputElement>(null);
-
-    // Handle file upload
-    const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-        const files = event.target.files;
-        if (!files || files.length === 0) return;
-
-        setIsUploadingFile(true);
-
-        for (const file of Array.from(files)) {
-            try {
-                const reader = new FileReader();
-
-                reader.onload = (e) => {
-                    const newGuideline: UploadedGuideline = {
-                        id: crypto.randomUUID(),
-                        name: file.name,
-                        content: e.target?.result as string,
-                        type: file.type.includes('pdf') ? 'pdf' : 'image'
-                    };
-
-                    setUploadedGuidelines(prev => [...prev, newGuideline]);
-                };
-
-                reader.readAsDataURL(file);
-            } catch (error) {
-                console.error('Error uploading file:', error);
-            }
-        }
-
-        setIsUploadingFile(false);
-        // Reset input
-        if (fileInputRef.current) {
-            fileInputRef.current.value = '';
-        }
-    };
-
-    // Remove uploaded guideline
-    const removeGuideline = (id: string) => {
-        setUploadedGuidelines(prev => prev.filter(g => g.id !== id));
-    };
-
-    // Check if patient has enough data
-    const hasAnamnesis = !!currentPatient?.clinicalRecords?.anamnesis?.content;
-    const hasFormulation = !!currentPatient?.eellsData || !!currentPatient?.clinicalRecords?.caseFormulation?.content;
-    const hasPBTNetwork = !!currentPatient?.clinicalRecords?.caseFormulation?.pbtData?.nodes?.length;
-
-    // Generate suggestions
-    const handleGenerateSuggestions = async () => {
-        setIsLoading(true);
-        try {
-            const { generateTreatmentSuggestions } = await import('../lib/gemini');
-
-            const patientData = {
-                anamnesis: currentPatient?.clinicalRecords?.anamnesis?.content || '',
-                formulation: currentPatient?.eellsData || currentPatient?.clinicalRecords?.caseFormulation?.eells || {},
-                pbtNetwork: currentPatient?.clinicalRecords?.caseFormulation?.pbtData || { nodes: [], edges: [] },
-                diagnosis: currentPatient?.primaryDisorder || '',
-                comorbidities: currentPatient?.comorbidities || []
+    const handlePdfUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const files = e.target.files;
+        if (!files) return;
+        Array.from(files).forEach(file => {
+            if (file.type !== 'application/pdf') return;
+            const reader = new FileReader();
+            reader.onload = () => {
+                const base64 = (reader.result as string).split(',')[1];
+                setPdfList(prev => [...prev, { name: file.name, base64 }]);
             };
-
-            const result = await generateTreatmentSuggestions(patientData);
-
-            setSuggestions(result.suggestions || []);
-        } catch (error) {
-            console.error('Error generating suggestions:', error);
-            // Mock suggestions for demo
-            setSuggestions([
-                { type: 'guideline', title: 'NICE Guideline CG113', description: 'Generalised Anxiety Disorder and Panic Disorder in Adults', source: 'NICE UK', selected: true },
-                { type: 'protocol', title: 'Protocolo Unificado (Barlow)', description: 'Tratamento transdiagnóstico para transtornos emocionais - 12-16 sessões', selected: false },
-                { type: 'protocol', title: 'TCC para TAG (Dugas)', description: 'Intervenção focada em intolerância à incerteza - 16 sessões', selected: false },
-                { type: 'gap', title: 'Histórico de Trauma', description: 'A anamnese não menciona avaliação de experiências traumáticas. Considere investigar.', selected: false }
-            ]);
-        } finally {
-            setIsLoading(false);
-        }
-    };
-
-    // Generate full plan
-    const handleGeneratePlan = async () => {
-        setPhase('generating');
-        setIsLoading(true);
-
-        try {
-            const { generateTreatmentPlan, generatePlanFromMaterial } = await import('../lib/gemini');
-
-            // Collect patient context text
-            const textContext = `
-                Paciente: ${currentPatient?.name}
-                Diagnóstico: ${currentPatient?.primaryDisorder}
-                Anamnese: ${currentPatient?.clinicalRecords?.anamnesis?.content || 'N/A'}
-                Conceituação Eells: ${JSON.stringify(currentPatient?.eellsData || {})}
-                Foco do Terapeuta: ${customFocus}
-            `;
-
-            let result;
-
-            // Priority: Uploaded Files > Library Protocol > Selected Suggestions
-            if (uploadedGuidelines.length > 0) {
-                // Use the first uploaded file
-                const fileToUse = uploadedGuidelines[0];
-                result = await generatePlanFromMaterial(
-                    textContext,
-                    { type: 'upload', info: fileToUse.content }
-                );
-            } else if (selectedLibraryProtocol) {
-                // Use selected library protocol
-                result = await generatePlanFromMaterial(
-                    textContext,
-                    { type: 'library', info: selectedLibraryProtocol }
-                );
-            } else {
-                // Standard generation from selected suggestions
-                const selectedSuggestions = suggestions.filter(s => s.selected);
-
-                const patientData = {
-                    anamnesis: currentPatient?.clinicalRecords?.anamnesis?.content || '',
-                    formulation: currentPatient?.eellsData || {},
-                    pbtNetwork: currentPatient?.clinicalRecords?.caseFormulation?.pbtData || { nodes: [], edges: [] },
-                    selectedProtocols: selectedSuggestions.map(s => s.title),
-                    customFocus
-                };
-
-                result = await generateTreatmentPlan(patientData);
-            }
-
-            const protocolName = uploadedGuidelines.length > 0
-                ? uploadedGuidelines[0].name
-                : (suggestions.find(s => s.selected)?.title || 'Personalizado');
-
-            const plan: TreatmentPlan = {
-                id: crypto.randomUUID(),
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-                protocol: result.protocol || protocolName,
-                totalSessions: result.totalSessions || '12-16',
-                frequency: result.frequency || 'Semanal',
-                phases: result.phases || [],
-                dischargeCriteria: result.dischargeCriteria || [],
-                notes: ''
-            };
-
-            setCurrentPlan(plan);
-            setPhase('review');
-        } catch (error) {
-            console.error('Error generating plan:', error);
-            // Mock plan for demo
-            setCurrentPlan({
-                id: crypto.randomUUID(),
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-                protocol: 'Protocolo Unificado (Barlow)',
-                totalSessions: '12-16',
-                frequency: 'Semanal',
-                phases: [
-                    {
-                        name: 'Fase Inicial',
-                        sessions: '1-4',
-                        objectives: ['Estabelecer aliança terapêutica', 'Psicoeducação sobre emoções', 'Monitoramento emocional'],
-                        interventions: ['Entrevista motivacional', 'Psicoeducação transdiagnóstica'],
-                        techniques: ['Registro de emoções', 'Escala SUDS', 'Modelo cognitivo-comportamental']
-                    },
-                    {
-                        name: 'Fase Intermediária',
-                        sessions: '5-12',
-                        objectives: ['Reavaliação cognitiva', 'Exposição gradual', 'Regulação emocional'],
-                        interventions: ['Reestruturação cognitiva', 'Exposição interoceptiva', 'Prevenção de comportamentos de segurança'],
-                        techniques: ['Registro de pensamentos', 'Hierarquia de exposição', 'Técnicas de tolerância ao desconforto']
-                    },
-                    {
-                        name: 'Fase Final',
-                        sessions: '13-16',
-                        objectives: ['Consolidar ganhos', 'Prevenir recaídas', 'Plano de manutenção'],
-                        interventions: ['Revisão de progresso', 'Identificação de gatilhos futuros'],
-                        techniques: ['Plano de prevenção de recaída', 'Sessões de reforço espaçadas']
-                    }
-                ],
-                dischargeCriteria: [
-                    'Redução de 50% nos sintomas (GAD-7 < 10)',
-                    'Capacidade de aplicar técnicas autonomamente',
-                    'Retorno ao funcionamento pré-mórbido'
-                ],
-                notes: ''
-            });
-            setPhase('review');
-        } finally {
-            setIsLoading(false);
-        }
-    };
-
-    // Save plan
-    const handleSavePlan = () => {
-        if (!currentPlan || !currentPatient) return;
-
-        updatePatient({
-            ...currentPatient,
-            clinicalRecords: {
-                ...currentPatient.clinicalRecords,
-                treatmentPlan: {
-                    ...currentPatient.clinicalRecords.treatmentPlan,
-                    goals: currentPlan.phases.flatMap(p => p.objectives),
-                    updatedAt: new Date().toISOString(),
-                    // Store full plan
-                    fullPlan: currentPlan as any
-                }
-            }
+            reader.readAsDataURL(file);
         });
-
-        alert('Plano de Tratamento salvo com sucesso!');
+        e.target.value = '';
     };
 
-    // Toggle suggestion selection
-    const toggleSuggestion = (index: number) => {
-        setSuggestions(prev => prev.map((s, i) =>
-            i === index ? { ...s, selected: !s.selected } : s
-        ));
-    };
+    const removePdf = (index: number) => setPdfList(prev => prev.filter((_, i) => i !== index));
 
-    // Toggle phase expansion
-    const togglePhase = (index: number) => {
-        const newExpanded = new Set(expandedPhases);
-        if (newExpanded.has(index)) {
-            newExpanded.delete(index);
-        } else {
-            newExpanded.add(index);
+    const handleDeepResearch = async () => {
+        if (!currentPatient) return;
+        setIsSearchingProtocols(true);
+        try {
+            const recommendations = await recommendProtocols({
+                name: currentPatient.name,
+                primaryDiagnosis: (currentPatient as any).primaryDiagnosis,
+                comorbidities: (currentPatient as any).comorbidities,
+                presentingProblems: (currentPatient as any).eellsData?.problemList?.map((p: any) => p.problem),
+            });
+            setProtocolRecommendations(recommendations);
+            setShowRecommendationsModal(true);
+        } catch (error) {
+            console.error('Error:', error);
+            alert('Erro na busca.');
+        } finally {
+            setIsSearchingProtocols(false);
         }
-        setExpandedPhases(newExpanded);
     };
 
-    // Render suggestion phase
-    const renderSuggestions = () => (
-        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
-            {/* Data Check */}
-            <div className="bg-gradient-to-r from-indigo-50 to-purple-50 rounded-xl p-4 border border-indigo-100">
-                <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2">
-                    <Target className="w-5 h-5 text-indigo-600" />
-                    Dados do Paciente
-                </h3>
-                <div className="grid grid-cols-3 gap-4 text-sm">
-                    <div className={`flex items-center gap-2 ${hasAnamnesis ? 'text-emerald-600' : 'text-amber-600'}`}>
-                        {hasAnamnesis ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
-                        Anamnese {hasAnamnesis ? '✓' : '(pendente)'}
+    const togglePhase = (phaseId: string) => {
+        setExpandedPhases(prev => prev.includes(phaseId) ? prev.filter(id => id !== phaseId) : [...prev, phaseId]);
+    };
+
+    const addPhase = () => {
+        if (!newPhaseName.trim()) return;
+        const lastPhase = treatmentPlan[treatmentPlan.length - 1];
+        const startSession = lastPhase ? lastPhase.sessionRange.end + 1 : 1;
+        setTreatmentPlan([...treatmentPlan, {
+            id: `phase_${Date.now()}`,
+            name: newPhaseName,
+            sessionRange: { start: startSession, end: startSession },
+            sessions: []
+        }]);
+        setNewPhaseName('');
+        setShowAddPhaseModal(false);
+    };
+
+    const updatePhaseName = (phaseId: string, newName: string) => {
+        setTreatmentPlan(prev => prev.map(p => p.id === phaseId ? { ...p, name: newName } : p));
+    };
+
+    const deletePhase = (phaseId: string) => {
+        if (!confirm('Excluir fase?')) return;
+        setTreatmentPlan(prev => prev.filter(p => p.id !== phaseId));
+    };
+
+    const addSession = (phaseId: string) => {
+        if (!newSessionObjectives.trim()) return;
+        setTreatmentPlan(prev => prev.map(phase => {
+            if (phase.id !== phaseId) return phase;
+            const newNumber = phase.sessions.length > 0 ? Math.max(...phase.sessions.map(s => s.number)) + 1 : phase.sessionRange.start;
+            return {
+                ...phase,
+                sessions: [...phase.sessions, { number: newNumber, objectives: newSessionObjectives.split('\n').filter(o => o.trim()), strategies: newSessionStrategies }],
+                sessionRange: { ...phase.sessionRange, end: newNumber }
+            };
+        }));
+        setNewSessionObjectives('');
+        setNewSessionStrategies('');
+        setShowAddSessionModal(null);
+    };
+
+    const updateSession = (phaseId: string, sessionNumber: number, updates: Partial<TreatmentSession>) => {
+        setTreatmentPlan(prev => prev.map(phase => {
+            if (phase.id !== phaseId) return phase;
+            return { ...phase, sessions: phase.sessions.map(s => s.number === sessionNumber ? { ...s, ...updates } : s) };
+        }));
+    };
+
+    const deleteSession = (phaseId: string, sessionNumber: number) => {
+        if (!confirm('Excluir sessão?')) return;
+        setTreatmentPlan(prev => prev.map(phase => {
+            if (phase.id !== phaseId) return phase;
+            const newSessions = phase.sessions.filter(s => s.number !== sessionNumber);
+            return { ...phase, sessions: newSessions, sessionRange: { start: phase.sessionRange.start, end: newSessions.length > 0 ? Math.max(...newSessions.map(s => s.number)) : phase.sessionRange.start } };
+        }));
+    };
+
+    const handleGenerateAnalysis = async () => {
+        if (!currentPatient) return;
+        setIsGeneratingAnalysis(true);
+        try {
+            const analysis = await generateClinicalAnalysisMultiPdf({
+                patientName: currentPatient.name,
+                sessionsCompleted: 12,
+                currentPhase: 'Transição de fases',
+                progress: 'Progresso em andamento',
+                recentChanges: 'Contexto atualizado',
+                currentPlan: treatmentPlan,
+                pdfContents: pdfList.length > 0 ? pdfList : undefined,
+                protocolRecommendations: protocolRecommendations || undefined
+            });
+            setCurrentAnalysis(analysis);
+            setShowAnalysisModal(true);
+        } catch (error) {
+            console.error('Error:', error);
+            alert('Erro ao gerar análise.');
+        } finally {
+            setIsGeneratingAnalysis(false);
+        }
+    };
+
+    if (!currentPatient) {
+        return <div className="flex items-center justify-center h-64"><p className="text-gray-500">Selecione um paciente</p></div>;
+    }
+
+    return (
+        <div className="max-w-6xl mx-auto p-6">
+            {/* Header */}
+            <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6">
+                <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                        <Target className="w-8 h-8 text-indigo-600" />
+                        <div>
+                            <h1 className="text-2xl font-bold text-gray-900">Plano de Tratamento</h1>
+                            <p className="text-sm text-gray-600">Baseado na Tríade da PBE</p>
+                        </div>
                     </div>
-                    <div className={`flex items-center gap-2 ${hasFormulation ? 'text-emerald-600' : 'text-amber-600'}`}>
-                        {hasFormulation ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
-                        Conceituação {hasFormulation ? '✓' : '(pendente)'}
-                    </div>
-                    <div className={`flex items-center gap-2 ${hasPBTNetwork ? 'text-emerald-600' : 'text-amber-600'}`}>
-                        {hasPBTNetwork ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
-                        Rede PBT {hasPBTNetwork ? '✓' : '(pendente)'}
+                    <div className="flex gap-2">
+                        <button onClick={() => setShowAddPhaseModal(true)} className="flex items-center gap-2 px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-semibold text-sm">
+                            <Plus className="w-4 h-4" /> Nova Fase
+                        </button>
+                        <button onClick={handleDeepResearch} disabled={isSearchingProtocols} className="flex items-center gap-2 px-3 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-semibold text-sm disabled:opacity-50">
+                            {isSearchingProtocols ? <Loader2 className="w-4 h-4 animate-spin" /> : <BookOpen className="w-4 h-4" />}
+                            Deep Research
+                        </button>
+                        <button onClick={handleGenerateAnalysis} disabled={isGeneratingAnalysis} className="flex items-center gap-2 px-3 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg font-semibold text-sm disabled:opacity-50">
+                            {isGeneratingAnalysis ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                            Análise Clínica IA
+                        </button>
                     </div>
                 </div>
-            </div>
-
-            {/* Upload Guidelines Section */}
-            <div className="bg-white rounded-xl p-4 border-2 border-dashed border-gray-200 hover:border-indigo-300 transition-colors">
-                <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2">
-                    <Upload className="w-5 h-5 text-indigo-600" />
-                    Carregar Guidelines/Protocolos (opcional)
-                </h3>
-                <p className="text-sm text-gray-500 mb-3">
-                    Faça upload de PDFs ou imagens de guidelines que você quer que a IA considere.
-                </p>
-
-                {/* Upload Button */}
-                <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".pdf,image/*"
-                    multiple
-                    onChange={handleFileUpload}
-                    className="hidden"
-                />
-                <button
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={isUploadingFile}
-                    className="w-full py-3 border-2 border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg font-medium flex items-center justify-center gap-2 transition-colors"
-                >
-                    {isUploadingFile ? <Loader2 className="w-5 h-5 animate-spin" /> : <Upload className="w-5 h-5" />}
-                    {isUploadingFile ? 'Carregando...' : 'Selecionar Arquivos'}
-                </button>
-
-                {/* Uploaded Files List */}
-                {uploadedGuidelines.length > 0 && (
-                    <div className="mt-3 space-y-2">
-                        {uploadedGuidelines.map((guideline) => (
-                            <div
-                                key={guideline.id}
-                                className="flex items-center justify-between p-2 bg-gray-50 rounded-lg"
-                            >
-                                <div className="flex items-center gap-2">
-                                    <FileText className="w-4 h-4 text-indigo-600" />
-                                    <span className="text-sm text-gray-700 truncate max-w-[200px]">
-                                        {guideline.name}
-                                    </span>
-                                    <span className={`px-2 py-0.5 rounded-full text-xs ${guideline.type === 'pdf' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'
-                                        }`}>
-                                        {guideline.type.toUpperCase()}
-                                    </span>
-                                </div>
-                                <button
-                                    onClick={() => removeGuideline(guideline.id)}
-                                    className="p-1 text-gray-400 hover:text-red-500 transition-colors"
-                                >
-                                    <Trash2 className="w-4 h-4" />
-                                </button>
-                            </div>
-                        ))}
+                <div className="border-t border-gray-200 pt-4">
+                    <div className="flex items-center gap-4">
+                        <label className="flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-semibold cursor-pointer border border-gray-300">
+                            <FileUp className="w-4 h-4" /> Adicionar Protocolos (PDF)
+                            <input type="file" accept=".pdf" multiple onChange={handlePdfUpload} className="hidden" />
+                        </label>
+                        <span className="text-sm text-gray-500">{pdfList.length === 0 ? 'Nenhum protocolo' : `${pdfList.length} protocolo(s)`}</span>
+                        {protocolRecommendations && <span className="text-sm text-amber-600">✓ Deep Research realizado</span>}
                     </div>
-                )}
-            </div>
-
-            {/* Library Protocol Dropdown */}
-            <div className="bg-gradient-to-r from-purple-50 to-indigo-50 rounded-xl p-4 border border-purple-200">
-                <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2">
-                    <BookOpen className="w-5 h-5 text-purple-600" />
-                    Selecionar da Biblioteca
-                </h3>
-                <p className="text-sm text-gray-500 mb-3">
-                    Escolha um protocolo ou livro da sua biblioteca para basear o plano.
-                </p>
-                <select
-                    value={selectedLibraryProtocol}
-                    onChange={(e) => setSelectedLibraryProtocol(e.target.value)}
-                    className="w-full p-3 border border-purple-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                >
-                    <option value="">-- Nenhum selecionado --</option>
-                    {libraryProtocols.map((protocol) => (
-                        <option key={protocol.file} value={protocol.file}>
-                            📚 {protocol.name}
-                        </option>
-                    ))}
-                </select>
-                {selectedLibraryProtocol && (
-                    <p className="mt-2 text-xs text-purple-600 flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3" />
-                        Protocolo selecionado: {libraryProtocols.find(p => p.file === selectedLibraryProtocol)?.name}
-                    </p>
-                )}
-            </div>
-
-            {/* Generate Suggestions Button */}
-            {suggestions.length === 0 && (
-                <div className="text-center py-8">
-                    <Sparkles className="w-16 h-16 text-indigo-300 mx-auto mb-4" />
-                    <h3 className="text-lg font-bold text-gray-700 mb-2">Gerar Sugestões de Tratamento</h3>
-                    <p className="text-gray-500 text-sm mb-4 max-w-md mx-auto">
-                        A IA vai analisar o caso{uploadedGuidelines.length > 0 ? ` e os ${uploadedGuidelines.length} arquivo(s) carregado(s)` : ''} para sugerir guidelines e protocolos.
-                    </p>
-                    <button
-                        onClick={handleGenerateSuggestions}
-                        disabled={isLoading}
-                        className="px-6 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white rounded-xl font-bold shadow-lg transition-all disabled:opacity-50 flex items-center gap-2 mx-auto"
-                    >
-                        {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}
-                        {isLoading ? 'Analisando...' : 'Analisar Caso'}
-                    </button>
-
-                    {/* Direct generation option when library/upload is selected */}
-                    {(selectedLibraryProtocol || uploadedGuidelines.length > 0) && (
-                        <div className="mt-4">
-                            <p className="text-gray-400 text-xs text-center mb-2">— ou —</p>
-                            <button
-                                onClick={handleGeneratePlan}
-                                disabled={isLoading}
-                                className="px-6 py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white rounded-xl font-bold shadow-lg transition-all disabled:opacity-50 flex items-center gap-2 mx-auto"
-                            >
-                                {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <FileText className="w-5 h-5" />}
-                                Gerar Plano do{' '}
-                                {selectedLibraryProtocol ? 'Protocolo' : 'Arquivo'}
-                            </button>
+                    {pdfList.length > 0 && (
+                        <div className="flex flex-wrap gap-2 mt-3">
+                            {pdfList.map((pdf, index) => (
+                                <div key={index} className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 border border-emerald-200 rounded-lg text-sm">
+                                    <FileText className="w-4 h-4 text-emerald-600" />
+                                    <span className="text-emerald-700 max-w-[150px] truncate">{pdf.name}</span>
+                                    <button onClick={() => removePdf(index)} className="text-red-400 hover:text-red-600"><X className="w-4 h-4" /></button>
+                                </div>
+                            ))}
                         </div>
                     )}
                 </div>
-            )}
-
-            {/* Suggestions List */}
-            {suggestions.length > 0 && (
-                <div className="space-y-4">
-                    <h3 className="font-bold text-gray-800 flex items-center gap-2">
-                        <BookOpen className="w-5 h-5 text-indigo-600" />
-                        Sugestões da IA (Selecione as relevantes)
-                    </h3>
-
-                    <div className="grid gap-3">
-                        {suggestions.map((suggestion, index) => (
-                            <div
-                                key={index}
-                                onClick={() => toggleSuggestion(index)}
-                                className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${suggestion.selected
-                                    ? 'border-indigo-400 bg-indigo-50 shadow-md'
-                                    : 'border-gray-200 bg-white hover:border-gray-300'
-                                    }`}
-                            >
-                                <div className="flex items-start gap-3">
-                                    <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 mt-0.5 ${suggestion.selected ? 'border-indigo-600 bg-indigo-600' : 'border-gray-300'
-                                        }`}>
-                                        {suggestion.selected && <CheckCircle2 className="w-3 h-3 text-white" />}
-                                    </div>
-                                    <div className="flex-1">
-                                        <div className="flex items-center gap-2 mb-1">
-                                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${suggestion.type === 'guideline' ? 'bg-blue-100 text-blue-700' :
-                                                suggestion.type === 'protocol' ? 'bg-purple-100 text-purple-700' :
-                                                    suggestion.type === 'gap' ? 'bg-amber-100 text-amber-700' :
-                                                        'bg-green-100 text-green-700'
-                                                }`}>
-                                                {suggestion.type === 'guideline' ? '📚 Guideline' :
-                                                    suggestion.type === 'protocol' ? '🧪 Protocolo' :
-                                                        suggestion.type === 'gap' ? '🔍 Lacuna' :
-                                                            '💡 Abordagem'}
-                                            </span>
-                                            <h4 className="font-bold text-gray-800">{suggestion.title}</h4>
-                                        </div>
-                                        <p className="text-sm text-gray-600">{suggestion.description}</p>
-                                        {suggestion.source && (
-                                            <p className="text-xs text-gray-400 mt-1">Fonte: {suggestion.source}</p>
-                                        )}
-                                    </div>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-
-                    {/* Custom Focus */}
-                    <div className="mt-4">
-                        <label className="block text-sm font-semibold text-gray-700 mb-2">
-                            Foco Adicional (opcional)
-                        </label>
-                        <textarea
-                            value={customFocus}
-                            onChange={(e) => setCustomFocus(e.target.value)}
-                            placeholder="Ex: Priorizar técnicas de exposição, focar em regulação emocional..."
-                            className="w-full p-3 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                            rows={2}
-                        />
-                    </div>
-
-                    {/* Generate Plan Button */}
-                    <button
-                        onClick={handleGeneratePlan}
-                        disabled={!suggestions.some(s => s.selected) || isLoading}
-                        className="w-full py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white rounded-xl font-bold shadow-lg transition-all disabled:opacity-50 flex items-center justify-center gap-2"
-                    >
-                        <FileText className="w-5 h-5" />
-                        Gerar Plano de Tratamento
-                    </button>
-                </div>
-            )}
-        </div>
-    );
-
-    // Render generating phase
-    const renderGenerating = () => (
-        <div className="flex flex-col items-center justify-center py-16 animate-in fade-in">
-            <Loader2 className="w-16 h-16 text-indigo-600 animate-spin mb-4" />
-            <h3 className="text-xl font-bold text-gray-800 mb-2">Gerando Plano de Tratamento</h3>
-            <p className="text-gray-500 text-sm text-center max-w-md">
-                A IA está integrando os dados do paciente com os protocolos selecionados para criar um plano personalizado...
-            </p>
-        </div>
-    );
-
-    // Render review phase
-    const renderReview = () => (
-        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
-            {/* Plan Header */}
-            <div className="bg-gradient-to-r from-emerald-50 to-teal-50 rounded-xl p-4 border border-emerald-200">
-                <div className="flex items-center justify-between mb-3">
-                    <h3 className="font-bold text-gray-800 flex items-center gap-2">
-                        <FileText className="w-5 h-5 text-emerald-600" />
-                        {currentPlan?.protocol}
-                    </h3>
-                    <div className="flex gap-2">
-                        <button
-                            onClick={() => setPhase('suggestions')}
-                            className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm font-medium flex items-center gap-1"
-                        >
-                            <RefreshCw className="w-4 h-4" />
-                            Regenerar
-                        </button>
-                        <button
-                            onClick={handleSavePlan}
-                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-bold flex items-center gap-1"
-                        >
-                            <Save className="w-4 h-4" />
-                            Salvar
-                        </button>
-                    </div>
-                </div>
-                <div className="grid grid-cols-3 gap-4 text-sm">
-                    <div>
-                        <span className="text-gray-500">Duração Total:</span>
-                        <p className="font-semibold text-gray-800">{currentPlan?.totalSessions} sessões</p>
-                    </div>
-                    <div>
-                        <span className="text-gray-500">Frequência:</span>
-                        <p className="font-semibold text-gray-800">{currentPlan?.frequency}</p>
-                    </div>
-                    <div>
-                        <span className="text-gray-500">Fases:</span>
-                        <p className="font-semibold text-gray-800">{currentPlan?.phases.length} fases</p>
-                    </div>
-                </div>
             </div>
 
-            {/* Treatment Phases */}
+            {/* Phases */}
             <div className="space-y-4">
-                {currentPlan?.phases.map((phase, index) => (
-                    <div key={index} className="bg-white border-2 border-gray-100 rounded-xl overflow-hidden">
-                        <button
-                            onClick={() => togglePhase(index)}
-                            className="w-full flex items-center justify-between p-4 hover:bg-gray-50 transition-colors"
-                        >
-                            <div className="flex items-center gap-3">
-                                <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-white ${index === 0 ? 'bg-blue-500' :
-                                    index === 1 ? 'bg-purple-500' :
-                                        'bg-emerald-500'
-                                    }`}>
-                                    {index + 1}
-                                </div>
-                                <div className="text-left">
-                                    <h4 className="font-bold text-gray-800">{phase.name}</h4>
-                                    <p className="text-sm text-gray-500">Sessões {phase.sessions}</p>
-                                </div>
-                            </div>
-                            {expandedPhases.has(index) ?
-                                <ChevronDown className="w-5 h-5 text-gray-400" /> :
-                                <ChevronRight className="w-5 h-5 text-gray-400" />
-                            }
-                        </button>
-
-                        {expandedPhases.has(index) && (
-                            <div className="p-4 pt-0 space-y-4 animate-in fade-in slide-in-from-top-2">
-                                {/* Objectives */}
-                                <div>
-                                    <h5 className="text-xs font-bold text-indigo-600 uppercase mb-2">🎯 Objetivos</h5>
-                                    <ul className="space-y-1">
-                                        {phase.objectives.map((obj, i) => (
-                                            <li key={i} className="text-sm text-gray-700 flex items-start gap-2">
-                                                <span className="text-indigo-500 mt-1">•</span>
-                                                {obj}
-                                            </li>
-                                        ))}
-                                    </ul>
-                                </div>
-
-                                {/* Interventions */}
-                                <div>
-                                    <h5 className="text-xs font-bold text-purple-600 uppercase mb-2">💡 Intervenções</h5>
-                                    <ul className="space-y-1">
-                                        {phase.interventions.map((int, i) => (
-                                            <li key={i} className="text-sm text-gray-700 flex items-start gap-2">
-                                                <span className="text-purple-500 mt-1">•</span>
-                                                {int}
-                                            </li>
-                                        ))}
-                                    </ul>
-                                </div>
-
-                                {/* Techniques */}
-                                <div>
-                                    <h5 className="text-xs font-bold text-emerald-600 uppercase mb-2">🛠️ Técnicas</h5>
-                                    <div className="flex flex-wrap gap-2">
-                                        {phase.techniques.map((tech, i) => (
-                                            <span key={i} className="px-2 py-1 bg-emerald-50 text-emerald-700 text-xs rounded-full border border-emerald-200">
-                                                {tech}
-                                            </span>
-                                        ))}
+                {treatmentPlan.map((phase) => {
+                    const isExpanded = expandedPhases.includes(phase.id);
+                    const isEditing = editingPhaseId === phase.id;
+                    return (
+                        <div key={phase.id} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                            <div className="p-4 flex items-center justify-between hover:bg-gray-50">
+                                <button onClick={() => togglePhase(phase.id)} className="flex items-center gap-3 flex-1 text-left">
+                                    {isExpanded ? <ChevronDown className="w-5 h-5 text-gray-400" /> : <ChevronRight className="w-5 h-5 text-gray-400" />}
+                                    <BookOpen className="w-5 h-5 text-indigo-600" />
+                                    <div>
+                                        {isEditing ? (
+                                            <input type="text" value={phase.name} onChange={(e) => updatePhaseName(phase.id, e.target.value)} onBlur={() => setEditingPhaseId(null)} className="font-bold border-b-2 border-indigo-500 outline-none" autoFocus />
+                                        ) : (
+                                            <h3 className="font-bold text-gray-900">{phase.name}</h3>
+                                        )}
+                                        <p className="text-sm text-gray-500">Sessões {phase.sessionRange.start}–{phase.sessionRange.end}</p>
                                     </div>
+                                </button>
+                                <div className="flex gap-2">
+                                    <button onClick={() => setEditingPhaseId(phase.id)} className="p-2 text-gray-400 hover:text-indigo-600"><Edit2 className="w-4 h-4" /></button>
+                                    <button onClick={() => deletePhase(phase.id)} className="p-2 text-gray-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
                                 </div>
                             </div>
-                        )}
-                    </div>
-                ))}
+                            {isExpanded && (
+                                <div className="border-t border-gray-200">
+                                    {phase.sessions.map((session) => {
+                                        const sessionKey = `${phase.id}-${session.number}`;
+                                        const isEditingSession = editingSessionKey === sessionKey;
+                                        return (
+                                            <div key={session.number} className="p-4 border-b border-gray-100 last:border-0 hover:bg-gray-50 group">
+                                                <div className="flex items-start gap-4">
+                                                    <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center">
+                                                        <span className="text-sm font-bold text-indigo-700">{session.number}</span>
+                                                    </div>
+                                                    <div className="flex-1">
+                                                        {isEditingSession ? (
+                                                            <div className="space-y-3">
+                                                                <textarea value={session.objectives.join('\n')} onChange={(e) => updateSession(phase.id, session.number, { objectives: e.target.value.split('\n').filter(o => o.trim()) })} className="w-full border rounded-lg p-2 text-sm" rows={3} />
+                                                                <textarea value={session.strategies} onChange={(e) => updateSession(phase.id, session.number, { strategies: e.target.value })} className="w-full border rounded-lg p-2 text-sm" rows={2} />
+                                                                <button onClick={() => setEditingSessionKey(null)} className="px-3 py-1 bg-indigo-600 text-white text-sm rounded-lg"><Save className="w-4 h-4 inline mr-1" /> Salvar</button>
+                                                            </div>
+                                                        ) : (
+                                                            <>
+                                                                <div className="mb-2">
+                                                                    <h4 className="text-xs font-semibold text-gray-500 uppercase">Objetivos</h4>
+                                                                    <ul className="list-disc list-inside">{session.objectives.map((obj, idx) => <li key={idx} className="text-sm text-gray-700">{obj}</li>)}</ul>
+                                                                </div>
+                                                                <div>
+                                                                    <h4 className="text-xs font-semibold text-gray-500 uppercase">Estratégias</h4>
+                                                                    <p className="text-sm text-gray-700">{session.strategies}</p>
+                                                                </div>
+                                                            </>
+                                                        )}
+                                                    </div>
+                                                    {!isEditingSession && (
+                                                        <div className="flex gap-1 opacity-0 group-hover:opacity-100">
+                                                            <button onClick={() => setEditingSessionKey(sessionKey)} className="p-1.5 text-gray-400 hover:text-indigo-600"><Edit2 className="w-4 h-4" /></button>
+                                                            <button onClick={() => deleteSession(phase.id, session.number)} className="p-1.5 text-gray-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                    <button onClick={() => setShowAddSessionModal(phase.id)} className="w-full p-3 text-indigo-600 hover:bg-indigo-50 flex items-center justify-center gap-2">
+                                        <Plus className="w-4 h-4" /> Adicionar Sessão
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                    );
+                })}
             </div>
 
-            {/* Discharge Criteria */}
-            {currentPlan?.dischargeCriteria && currentPlan.dischargeCriteria.length > 0 && (
-                <div className="bg-amber-50 rounded-xl p-4 border border-amber-200">
-                    <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2">
-                        <CheckCircle2 className="w-5 h-5 text-amber-600" />
-                        Critérios de Alta
-                    </h3>
-                    <ul className="space-y-2">
-                        {currentPlan.dischargeCriteria.map((criteria, i) => (
-                            <li key={i} className="text-sm text-gray-700 flex items-start gap-2">
-                                <span className="text-amber-500 mt-1">✓</span>
-                                {criteria}
-                            </li>
-                        ))}
-                    </ul>
+            {/* Add Phase Modal */}
+            {showAddPhaseModal && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-xl p-6 w-full max-w-md">
+                        <h3 className="text-lg font-bold mb-4">Nova Fase</h3>
+                        <input type="text" placeholder="Nome da fase" value={newPhaseName} onChange={(e) => setNewPhaseName(e.target.value)} className="w-full border rounded-lg px-4 py-3 mb-4" autoFocus />
+                        <div className="flex gap-3">
+                            <button onClick={addPhase} className="flex-1 py-2 bg-indigo-600 text-white rounded-lg font-semibold">Criar</button>
+                            <button onClick={() => setShowAddPhaseModal(false)} className="px-4 py-2 bg-gray-200 rounded-lg">Cancelar</button>
+                        </div>
+                    </div>
                 </div>
             )}
-        </div>
-    );
 
-    return (
-        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
-            {/* Header */}
-            <div className="flex items-center justify-between">
-                <div>
-                    <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-                        <Sparkles className="w-6 h-6 text-indigo-600" />
-                        Plano de Tratamento (PBE)
-                    </h2>
-                    <p className="text-gray-600 text-sm mt-1">
-                        Gere planos personalizados baseados em evidências
-                    </p>
+            {/* Add Session Modal */}
+            {showAddSessionModal && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-xl p-6 w-full max-w-lg">
+                        <h3 className="text-lg font-bold mb-4">Nova Sessão</h3>
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium mb-1">Objetivos (um por linha)</label>
+                                <textarea value={newSessionObjectives} onChange={(e) => setNewSessionObjectives(e.target.value)} className="w-full border rounded-lg px-4 py-2" rows={3} />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium mb-1">Estratégias</label>
+                                <textarea value={newSessionStrategies} onChange={(e) => setNewSessionStrategies(e.target.value)} className="w-full border rounded-lg px-4 py-2" rows={2} />
+                            </div>
+                        </div>
+                        <div className="flex gap-3 mt-4">
+                            <button onClick={() => addSession(showAddSessionModal)} className="flex-1 py-2 bg-indigo-600 text-white rounded-lg font-semibold">Adicionar</button>
+                            <button onClick={() => setShowAddSessionModal(null)} className="px-4 py-2 bg-gray-200 rounded-lg">Cancelar</button>
+                        </div>
+                    </div>
                 </div>
-                <div className="flex items-center gap-2 text-sm">
-                    <span className={`px-3 py-1 rounded-full font-medium ${phase === 'suggestions' ? 'bg-indigo-100 text-indigo-700' :
-                        phase === 'generating' ? 'bg-amber-100 text-amber-700' :
-                            'bg-emerald-100 text-emerald-700'
-                        }`}>
-                        {phase === 'suggestions' ? '1. Sugestões' :
-                            phase === 'generating' ? '2. Gerando...' :
-                                '3. Revisão'}
-                    </span>
-                </div>
-            </div>
+            )}
 
-            {/* Content based on phase */}
-            {phase === 'suggestions' && renderSuggestions()}
-            {phase === 'generating' && renderGenerating()}
-            {(phase === 'review' || phase === 'editing') && renderReview()}
+            {/* Analysis Modal */}
+            {showAnalysisModal && currentAnalysis && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-2xl max-w-5xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+                        <div className="p-6 border-b flex items-center justify-between bg-gradient-to-r from-purple-50 to-indigo-50">
+                            <div className="flex items-center gap-3">
+                                <FileText className="w-6 h-6 text-purple-600" />
+                                <h2 className="text-xl font-bold">Análise Clínica PBE</h2>
+                            </div>
+                            <button onClick={() => setShowAnalysisModal(false)} className="text-gray-400 hover:text-gray-600">✕</button>
+                        </div>
+                        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                            {currentAnalysis.pbeTriadAnalysis && (
+                                <section className="bg-gradient-to-r from-purple-50 to-indigo-50 rounded-lg p-4">
+                                    <h3 className="font-bold mb-3">🔬 Análise da Tríade PBE</h3>
+                                    <div className="grid grid-cols-3 gap-4 text-sm">
+                                        <div><p className="font-semibold text-purple-700">Evidência</p><p className="text-gray-600">{currentAnalysis.pbeTriadAnalysis.evidenceUsed}</p></div>
+                                        <div><p className="font-semibold text-indigo-700">Expertise</p><p className="text-gray-600">{currentAnalysis.pbeTriadAnalysis.expertiseApplied}</p></div>
+                                        <div><p className="font-semibold text-blue-700">Contexto</p><p className="text-gray-600">{currentAnalysis.pbeTriadAnalysis.patientContextIntegration}</p></div>
+                                    </div>
+                                </section>
+                            )}
+                            <section><h3 className="text-lg font-bold mb-2">1. Introdução</h3><p className="text-gray-700 whitespace-pre-wrap">{currentAnalysis.introduction}</p></section>
+                            <section><h3 className="text-lg font-bold mb-2">2. Síntese</h3><p className="text-gray-700 whitespace-pre-wrap">{currentAnalysis.synthesis}</p></section>
+                            <section>
+                                <h3 className="text-lg font-bold mb-3">3. Fatores</h3>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                                        <h4 className="font-semibold text-green-800 mb-2">Proteção</h4>
+                                        <ul className="space-y-1">{currentAnalysis.protectionFactors?.map((f, i) => <li key={i} className="text-sm text-green-700">✓ {f}</li>)}</ul>
+                                    </div>
+                                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                                        <h4 className="font-semibold text-amber-800 mb-2">Risco</h4>
+                                        <ul className="space-y-1">{currentAnalysis.riskFactors?.map((f, i) => <li key={i} className="text-sm text-amber-700 flex items-start gap-1"><AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" /> {f}</li>)}</ul>
+                                    </div>
+                                </div>
+                            </section>
+                            <section><h3 className="text-lg font-bold mb-2">4. Recomendação</h3><div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4 mb-3"><p className="font-semibold text-indigo-900">{currentAnalysis.recommendation}</p></div><p className="text-gray-700 whitespace-pre-wrap">{currentAnalysis.recommendationText}</p></section>
+                            <section><h3 className="text-lg font-bold mb-2">5. Conclusão</h3><p className="text-gray-700 whitespace-pre-wrap">{currentAnalysis.conclusion}</p></section>
+                        </div>
+                        <div className="p-4 border-t flex justify-end"><button onClick={() => setShowAnalysisModal(false)} className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-semibold">Fechar</button></div>
+                    </div>
+                </div>
+            )}
+
+            {/* Deep Research Modal */}
+            {showRecommendationsModal && protocolRecommendations && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+                        <div className="p-6 border-b flex items-center justify-between bg-gradient-to-r from-amber-50 to-orange-50">
+                            <div className="flex items-center gap-3">
+                                <BookOpen className="w-6 h-6 text-amber-600" />
+                                <div>
+                                    <h2 className="text-xl font-bold">Deep Research - Protocolos Recomendados</h2>
+                                    <p className="text-sm text-gray-600">Baseado na Tríade PBE para {currentPatient?.name}</p>
+                                </div>
+                            </div>
+                            <button onClick={() => setShowRecommendationsModal(false)} className="text-gray-400 hover:text-gray-600">✕</button>
+                        </div>
+                        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                            {protocolRecommendations.triadAnalysis && (
+                                <section className="bg-gradient-to-r from-purple-50 to-indigo-50 rounded-lg p-4">
+                                    <h3 className="font-bold mb-3">🔬 Análise da Tríade PBE</h3>
+                                    <div className="grid grid-cols-3 gap-4 text-sm">
+                                        <div><p className="font-semibold text-purple-700">Evidência</p><p className="text-gray-600">{protocolRecommendations.triadAnalysis.evidenceConsiderations}</p></div>
+                                        <div><p className="font-semibold text-indigo-700">Expertise</p><p className="text-gray-600">{protocolRecommendations.triadAnalysis.expertiseConsiderations}</p></div>
+                                        <div><p className="font-semibold text-blue-700">Contexto</p><p className="text-gray-600">{protocolRecommendations.triadAnalysis.patientContextConsiderations}</p></div>
+                                    </div>
+                                </section>
+                            )}
+                            <section>
+                                <h3 className="font-bold mb-3">📚 Protocolos Recomendados</h3>
+                                <div className="space-y-4">
+                                    {protocolRecommendations.recommendations?.map((rec: any, idx: number) => (
+                                        <div key={idx} className="bg-white border rounded-lg p-4 hover:shadow-md">
+                                            <div className="flex items-start justify-between mb-2">
+                                                <h4 className="font-bold">{rec.protocolName}</h4>
+                                                <span className={`px-2 py-1 rounded-full text-xs font-semibold ${rec.evidenceLevel === 'forte' ? 'bg-green-100 text-green-700' : rec.evidenceLevel === 'moderado' ? 'bg-yellow-100 text-yellow-700' : 'bg-blue-100 text-blue-700'}`}>{rec.evidenceLevel}</span>
+                                            </div>
+                                            <p className="text-sm text-gray-500 mb-2">{rec.authors} • {rec.estimatedDuration}</p>
+                                            <p className="text-gray-700 mb-3">{rec.indicationRationale}</p>
+                                            <div className="flex flex-wrap gap-2 mb-2">
+                                                {rec.keyComponents?.map((comp: string, i: number) => <span key={i} className="px-2 py-1 bg-gray-100 text-xs rounded">{comp}</span>)}
+                                            </div>
+                                            <p className="text-xs text-gray-400">{rec.reference}</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            </section>
+                            <section className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                                <h3 className="font-bold text-amber-800 mb-2">💡 Recomendação Geral</h3>
+                                <p className="text-gray-700">{protocolRecommendations.summaryRecommendation}</p>
+                            </section>
+                        </div>
+                        <div className="p-4 border-t flex justify-end gap-3">
+                            <button onClick={() => setShowRecommendationsModal(false)} className="px-4 py-2 bg-gray-200 rounded-lg">Fechar</button>
+                            <button onClick={() => setShowRecommendationsModal(false)} className="px-4 py-2 bg-amber-500 text-white rounded-lg font-semibold">Usar na Análise</button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

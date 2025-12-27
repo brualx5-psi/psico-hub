@@ -55,6 +55,12 @@ export const PatientProvider: React.FC<{ children: ReactNode }> = ({ children })
                     name: "Maria Silva Santos",
                     birthDate: "1985-05-15",
                     createdAt: new Date().toISOString(),
+                    status: 'ativo',
+                    schedule: {
+                        dayOfWeek: 1, // Segunda-feira
+                        time: "14:00",
+                        frequency: 'semanal'
+                    },
                     clinicalRecords: {
                         anamnesis: {
                             content: JSON.stringify(anamnesisRich),
@@ -88,6 +94,16 @@ export const PatientProvider: React.FC<{ children: ReactNode }> = ({ children })
                 name: "Maria Silva Santos",
                 birthDate: "1985-05-15",
                 createdAt: new Date().toISOString(),
+                status: 'ativo',
+                schedule: {
+                    dayOfWeek: 1, // Segunda-feira
+                    time: "14:00",
+                    frequency: 'semanal'
+                },
+                billing: {
+                    paymentType: 'particular',
+                    sessionValue: 200
+                },
                 clinicalRecords: {
                     anamnesis: {
                         content: JSON.stringify(anamnesisRich),
@@ -102,7 +118,158 @@ export const PatientProvider: React.FC<{ children: ReactNode }> = ({ children })
                 },
                 eellsData: initializeEellsData()
             };
-            setPatients([mariaData]);
+
+            // Additional demo patients for testing
+            const demoPatientsData: Patient[] = [
+                mariaData,
+                {
+                    id: crypto.randomUUID(),
+                    name: "João Carlos Souza",
+                    birthDate: "1990-08-22",
+                    createdAt: new Date().toISOString(),
+                    status: 'ativo',
+                    schedule: { dayOfWeek: 1, time: "16:00", frequency: 'semanal' },
+                    billing: {
+                        paymentType: 'convenio',
+                        sessionValue: 150,
+                        insurance: { name: 'Unimed', reimbursementDays: 60, billingType: 'mensal' as const }
+                    },
+                    clinicalRecords: {
+                        anamnesis: { content: "", updatedAt: new Date().toISOString(), history: [] },
+                        caseFormulation: { content: "", updatedAt: new Date().toISOString() },
+                        treatmentPlan: { goals: [], updatedAt: new Date().toISOString() },
+                        assessments: [], customProtocols: [], sessions: []
+                    },
+                    eellsData: initializeEellsData()
+                },
+                {
+                    id: crypto.randomUUID(),
+                    name: "Ana Paula Lima",
+                    birthDate: "1978-03-10",
+                    createdAt: new Date().toISOString(),
+                    status: 'ativo',
+                    schedule: { dayOfWeek: 2, time: "10:00", frequency: 'semanal' },
+                    billing: {
+                        paymentType: 'particular',
+                        sessionValue: 250
+                    },
+                    clinicalRecords: {
+                        anamnesis: { content: "", updatedAt: new Date().toISOString(), history: [] },
+                        caseFormulation: { content: "", updatedAt: new Date().toISOString() },
+                        treatmentPlan: { goals: [], updatedAt: new Date().toISOString() },
+                        assessments: [], customProtocols: [], sessions: []
+                    },
+                    eellsData: initializeEellsData()
+                },
+                {
+                    id: crypto.randomUUID(),
+                    name: "Pedro Henrique Costa",
+                    birthDate: "1995-11-05",
+                    createdAt: new Date().toISOString(),
+                    status: 'ativo',
+                    schedule: { dayOfWeek: 2, time: "15:00", frequency: 'quinzenal' },
+                    billing: {
+                        paymentType: 'pacote',
+                        sessionValue: 175,
+                        package: { totalSessions: 8, usedSessions: 3, packageValue: 1400 }
+                    },
+                    clinicalRecords: {
+                        anamnesis: { content: "", updatedAt: new Date().toISOString(), history: [] },
+                        caseFormulation: { content: "", updatedAt: new Date().toISOString() },
+                        treatmentPlan: { goals: [], updatedAt: new Date().toISOString() },
+                        assessments: [], customProtocols: [], sessions: []
+                    },
+                    eellsData: initializeEellsData()
+                },
+                {
+                    id: crypto.randomUUID(),
+                    name: "Carla Fernandes",
+                    birthDate: "1988-07-18",
+                    createdAt: new Date().toISOString(),
+                    status: 'ativo',
+                    schedule: { dayOfWeek: 3, time: "14:00", frequency: 'semanal' },
+                    billing: {
+                        paymentType: 'convenio',
+                        sessionValue: 180,
+                        insurance: { name: 'Bradesco Saúde', reimbursementDays: 45, billingType: 'mensal' as const }
+                    },
+                    clinicalRecords: {
+                        anamnesis: { content: "", updatedAt: new Date().toISOString(), history: [] },
+                        caseFormulation: { content: "", updatedAt: new Date().toISOString() },
+                        treatmentPlan: { goals: [], updatedAt: new Date().toISOString() },
+                        assessments: [], customProtocols: [], sessions: []
+                    },
+                    eellsData: initializeEellsData()
+                },
+                {
+                    id: crypto.randomUUID(),
+                    name: "Roberto Almeida",
+                    birthDate: "1972-12-30",
+                    createdAt: new Date().toISOString(),
+                    status: 'ativo',
+                    schedule: { dayOfWeek: 4, time: "09:00", frequency: 'semanal' },
+                    billing: {
+                        paymentType: 'particular',
+                        sessionValue: 300
+                    },
+                    clinicalRecords: {
+                        anamnesis: { content: "", updatedAt: new Date().toISOString(), history: [] },
+                        caseFormulation: { content: "", updatedAt: new Date().toISOString() },
+                        treatmentPlan: { goals: [], updatedAt: new Date().toISOString() },
+                        assessments: [], customProtocols: [], sessions: []
+                    },
+                    eellsData: initializeEellsData()
+                },
+                {
+                    id: crypto.randomUUID(),
+                    name: "Luciana Martins",
+                    birthDate: "1992-01-25",
+                    createdAt: new Date().toISOString(),
+                    status: 'ativo',
+                    schedule: { dayOfWeek: 5, time: "11:00", frequency: 'semanal' },
+                    clinicalRecords: {
+                        anamnesis: { content: "", updatedAt: new Date().toISOString(), history: [] },
+                        caseFormulation: { content: "", updatedAt: new Date().toISOString() },
+                        treatmentPlan: { goals: [], updatedAt: new Date().toISOString() },
+                        assessments: [], customProtocols: [], sessions: []
+                    },
+                    eellsData: initializeEellsData()
+                },
+                {
+                    id: crypto.randomUUID(),
+                    name: "Marcos Oliveira",
+                    birthDate: "1982-06-14",
+                    createdAt: new Date().toISOString(),
+                    status: 'inativo',
+                    inactivationReason: 'alta',
+                    inactivationDate: "2024-11-15",
+                    clinicalRecords: {
+                        anamnesis: { content: "", updatedAt: new Date().toISOString(), history: [] },
+                        caseFormulation: { content: "", updatedAt: new Date().toISOString() },
+                        treatmentPlan: { goals: [], updatedAt: new Date().toISOString() },
+                        assessments: [], customProtocols: [], sessions: []
+                    },
+                    eellsData: initializeEellsData()
+                },
+                {
+                    id: crypto.randomUUID(),
+                    name: "Juliana Santos",
+                    birthDate: "1999-04-08",
+                    createdAt: new Date().toISOString(),
+                    status: 'inativo',
+                    inactivationReason: 'abandono',
+                    inactivationDate: "2024-10-20",
+                    clinicalRecords: {
+                        anamnesis: { content: "", updatedAt: new Date().toISOString(), history: [] },
+                        caseFormulation: { content: "", updatedAt: new Date().toISOString() },
+                        treatmentPlan: { goals: [], updatedAt: new Date().toISOString() },
+                        assessments: [], customProtocols: [], sessions: []
+                    },
+                    eellsData: initializeEellsData()
+                }
+            ];
+
+            setPatients(demoPatientsData);
         }
         setIsLoading(false);
     }, []);
@@ -120,6 +287,7 @@ export const PatientProvider: React.FC<{ children: ReactNode }> = ({ children })
             name,
             ...demographics,
             createdAt: new Date().toISOString(),
+            status: 'ativo', // Default to active
             clinicalRecords: {
                 anamnesis: { content: "", updatedAt: new Date().toISOString(), history: [] },
                 caseFormulation: { content: "", updatedAt: new Date().toISOString() },

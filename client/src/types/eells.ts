@@ -60,6 +60,50 @@ export interface GoalProgressEntry {
     sessionId?: string;
 }
 
+// ============ GAS (Goal Attainment Scale) ============
+
+export interface GASLevelDescriptions {
+    minus2: string;  // Muito pior que o esperado
+    minus1: string;  // Pior que o esperado
+    zero: string;    // Meta esperada (baseline)
+    plus1: string;   // Melhor que o esperado
+    plus2: string;   // Muito melhor que o esperado
+}
+
+export interface GASEvaluation {
+    id: string;
+    date: string;
+    level: number;           // -2 a +2
+    sessionId?: string;      // Link com sessão
+    notes: string;           // Observações/evidências
+}
+
+export interface GASMeta {
+    id: string;
+    title: string;                    // Ex: "Realizar contribuições nas reuniões"
+    linkedProblems: string[];         // IDs da lista de problemas
+    levels: GASLevelDescriptions;     // Descrições personalizadas
+    evaluations: GASEvaluation[];     // Histórico de avaliações
+    currentLevel: number;             // -2 a +2 (atual)
+    status: 'active' | 'achieved' | 'revised' | 'archived';
+    startDate: string;
+    targetDate?: string;
+    createdAt: string;
+}
+
+export interface GASPlan {
+    id: string;
+    title: string;                    // Ex: "Tratamento ansiedade social - 1º semestre"
+    patientId: string;
+    metas: GASMeta[];                 // Múltiplas metas por plano
+    status: 'active' | 'completed' | 'archived';
+    createdAt: string;
+    updatedAt: string;
+}
+
+// ============ End GAS ============
+
+
 export interface Intervention {
     id: string;
     name: string;
@@ -172,4 +216,7 @@ export interface EellsData {
         nodes: any[];
         edges: any[];
     };
+
+    // 8. GAS (Goal Attainment Scale)
+    gasPlans?: GASPlan[];
 }

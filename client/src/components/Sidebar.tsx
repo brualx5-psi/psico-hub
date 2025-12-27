@@ -1,5 +1,8 @@
 import React, { useState } from 'react';
 import { usePatients } from '../context/PatientContext';
+import { InactivatePatientDialog } from './InactivatePatientDialog';
+import { EditScheduleDialog } from './EditScheduleDialog';
+import { EditBillingDialog } from './EditBillingDialog';
 import {
     LayoutDashboard,
     Zap,
@@ -15,10 +18,15 @@ import {
     FileUser,
     ChevronDown,
     ChevronRight,
-    Library
+    Library,
+    UserCheck,
+    UserX,
+    Calendar,
+    Clock,
+    DollarSign
 } from 'lucide-react';
 
-type TabType = 'dashboard' | 'soap' | 'network' | 'plan' | 'forms' | 'anamnesis' | 'formulation' | 'curation' | 'evolution' | 'alchemy' | 'copilot' | 'eells' | 'prontuario' | 'library';
+type TabType = 'dashboard' | 'soap' | 'network' | 'plan' | 'forms' | 'anamnesis' | 'formulation' | 'curation' | 'evolution' | 'alchemy' | 'copilot' | 'eells' | 'prontuario' | 'library' | 'financeiro' | 'sessoes' | 'homework';
 
 export interface SidebarProps {
     activeTab: TabType;
@@ -41,8 +49,57 @@ interface MenuCategory {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, isCollapsed, onToggle }) => {
-    const { currentPatient, clearCurrentPatient } = usePatients();
+    const { currentPatient, clearCurrentPatient, updatePatient } = usePatients();
     const [expandedCategories, setExpandedCategories] = useState<string[]>(['formulation', 'sessions', 'evolution']);
+    const [showInactivateDialog, setShowInactivateDialog] = useState(false);
+    const [showScheduleDialog, setShowScheduleDialog] = useState(false);
+    const [showBillingDialog, setShowBillingDialog] = useState(false);
+    const [showMoreActions, setShowMoreActions] = useState(false);
+
+    const DAY_NAMES: Record<number, string> = {
+        0: 'Dom', 1: 'Seg', 2: 'Ter', 3: 'Qua', 4: 'Qui', 5: 'Sex', 6: 'Sáb'
+    };
+
+    const handleToggleStatus = () => {
+        if (!currentPatient) return;
+
+        if (currentPatient.status === 'ativo') {
+            // Show dialog to get inactivation reason
+            setShowInactivateDialog(true);
+        } else {
+            // Reactivate patient directly
+            const updated = { ...currentPatient, status: 'ativo' as const, inactivationDate: undefined, inactivationReason: undefined };
+            updatePatient(updated);
+        }
+    };
+
+    const handleInactivate = (reason: 'alta' | 'abandono' | 'transferencia' | 'outro', notes?: string) => {
+        if (!currentPatient) return;
+        const updated = {
+            ...currentPatient,
+            status: 'inativo' as const,
+            inactivationDate: new Date().toISOString(),
+            inactivationReason: reason,
+            inactivationNotes: notes
+        };
+        updatePatient(updated);
+    };
+
+    const handleSaveSchedule = (schedule: { dayOfWeek: 0 | 1 | 2 | 3 | 4 | 5 | 6; time: string; frequency: 'semanal' | 'quinzenal' | 'mensal' }) => {
+        if (!currentPatient) return;
+        const updated = { ...currentPatient, schedule };
+        updatePatient(updated);
+    };
+
+    const handleSaveBilling = (billing: any) => {
+        if (!currentPatient) return;
+        const updated = { ...currentPatient, billing };
+        updatePatient(updated);
+    };
+
+    const formatCurrency = (value: number) => {
+        return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
+    };
 
     const toggleCategory = (categoryId: string) => {
         if (isCollapsed) return;
@@ -72,7 +129,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, isColl
             icon: FileText,
             items: [
                 { id: 'copilot', label: 'Co-Piloto', icon: Zap },
-                { id: 'soap', label: 'Sessão Atual', icon: FileText }
+                { id: 'soap', label: 'Sessão Atual', icon: FileText },
+                { id: 'homework', label: 'Lições de Casa', icon: BookOpen },
+                { id: 'sessoes', label: 'Agenda/Presença', icon: Calendar }
             ]
         },
         {
@@ -83,7 +142,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, isColl
                 { id: 'prontuario', label: 'Fichas de Evolução', icon: BookOpen },
                 { id: 'evolution', label: 'Progresso', icon: TrendingUp },
                 { id: 'forms', label: 'Monitoramento', icon: ClipboardList },
-                { id: 'alchemy', label: 'Recursos', icon: Sparkles }
+                { id: 'financeiro', label: 'Financeiro', icon: DollarSign }
             ]
         }
     ];
@@ -108,19 +167,90 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, isColl
                     {!isCollapsed && (
                         <div className="flex-1 min-w-0">
                             <h2 className="text-white font-bold text-lg truncate">{currentPatient?.name}</h2>
-                            <p className="text-gray-400 text-xs text-nowrap">EM ATENDIMENTO</p>
+                            <p className={`text-xs font-semibold ${currentPatient?.status === 'ativo' ? 'text-emerald-400' : 'text-gray-400'}`}>
+                                {currentPatient?.status === 'ativo' ? '● ATIVO' : '○ INATIVO'}
+                            </p>
+                            {currentPatient?.schedule && (
+                                <p className="text-xs text-indigo-300 mt-0.5">
+                                    📅 {DAY_NAMES[currentPatient.schedule.dayOfWeek]} {currentPatient.schedule.time}
+                                </p>
+                            )}
+                            {currentPatient?.billing && (
+                                <p className="text-xs text-emerald-300 mt-0.5">
+                                    💰 {currentPatient.billing.paymentType === 'particular' ? 'Particular' :
+                                        currentPatient.billing.paymentType === 'convenio' ? currentPatient.billing.insurance?.name : 'Pacote'}
+                                    {' • '}{formatCurrency(currentPatient.billing.sessionValue)}
+                                </p>
+                            )}
                         </div>
                     )}
                 </div>
-                {!isCollapsed && (
+
+                {/* Action Buttons */}
+                <div className="space-y-2">
+                    {/* Exit Button - Always visible */}
                     <button
                         onClick={clearCurrentPatient}
-                        className="w-full flex items-center justify-center gap-2 bg-red-600/20 hover:bg-red-600/30 border border-red-500/30 text-red-400 px-3 py-2 rounded-lg text-sm font-semibold transition-all"
+                        className={`w-full flex items-center justify-center gap-2 bg-red-600/20 hover:bg-red-600/30 border border-red-500/30 text-red-400 px-3 py-2 rounded-lg font-semibold transition-all ${isCollapsed ? 'text-xs' : 'text-sm'
+                            }`}
+                        title="Sair do Paciente"
                     >
                         <LogOut className="w-4 h-4" />
-                        Sair do Paciente
+                        {!isCollapsed && 'Sair do Paciente'}
                     </button>
-                )}
+
+                    {/* Toggle More Actions Button */}
+                    {!isCollapsed && (
+                        <button
+                            onClick={() => setShowMoreActions(!showMoreActions)}
+                            className="w-full flex items-center justify-center gap-2 bg-gray-700/50 hover:bg-gray-700 border border-gray-600 text-gray-300 px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
+                        >
+                            {showMoreActions ? (
+                                <><ChevronDown className="w-3 h-3" />Recolher Opções</>
+                            ) : (
+                                <><ChevronRight className="w-3 h-3" />Mais Opções</>
+                            )}
+                        </button>
+                    )}
+
+                    {/* Collapsible Buttons */}
+                    {!isCollapsed && showMoreActions && (
+                        <>
+                            {/* Status Toggle Button */}
+                            <button
+                                onClick={handleToggleStatus}
+                                className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold transition-all border ${currentPatient?.status === 'ativo'
+                                    ? 'bg-amber-600/20 hover:bg-amber-600/30 border-amber-500/30 text-amber-400'
+                                    : 'bg-emerald-600/20 hover:bg-emerald-600/30 border-emerald-500/30 text-emerald-400'
+                                    }`}
+                            >
+                                {currentPatient?.status === 'ativo' ? (
+                                    <><UserX className="w-4 h-4" />Inativar Paciente</>
+                                ) : (
+                                    <><UserCheck className="w-4 h-4" />Reativar Paciente</>
+                                )}
+                            </button>
+
+                            {/* Edit Schedule Button */}
+                            <button
+                                onClick={() => setShowScheduleDialog(true)}
+                                className="w-full flex items-center justify-center gap-2 bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/30 text-indigo-400 px-3 py-2 rounded-lg text-sm font-semibold transition-all"
+                            >
+                                <Clock className="w-4 h-4" />
+                                Editar Horário
+                            </button>
+
+                            {/* Edit Billing Button */}
+                            <button
+                                onClick={() => setShowBillingDialog(true)}
+                                className="w-full flex items-center justify-center gap-2 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-400 px-3 py-2 rounded-lg text-sm font-semibold transition-all"
+                            >
+                                <DollarSign className="w-4 h-4" />
+                                Configuração Financeira
+                            </button>
+                        </>
+                    )}
+                </div>
             </div>
 
             {/* Navigation */}
@@ -222,6 +352,32 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, isColl
                     <p className="mt-1">v2.0 • Modelo Eells</p>
                 </div>
             </div>
+
+            {/* Inactivate Dialog */}
+            <InactivatePatientDialog
+                isOpen={showInactivateDialog}
+                patientName={currentPatient?.name || ''}
+                onClose={() => setShowInactivateDialog(false)}
+                onConfirm={handleInactivate}
+            />
+
+            {/* Schedule Dialog */}
+            <EditScheduleDialog
+                isOpen={showScheduleDialog}
+                patientName={currentPatient?.name || ''}
+                currentSchedule={currentPatient?.schedule}
+                onClose={() => setShowScheduleDialog(false)}
+                onSave={handleSaveSchedule}
+            />
+
+            {/* Billing Dialog */}
+            <EditBillingDialog
+                isOpen={showBillingDialog}
+                patientName={currentPatient?.name || ''}
+                currentBilling={currentPatient?.billing}
+                onClose={() => setShowBillingDialog(false)}
+                onSave={handleSaveBilling}
+            />
         </div>
     );
 };

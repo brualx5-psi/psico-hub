@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { LineChart, Sparkles, TrendingUp, AlertTriangle, ArrowRight, BrainCircuit, Loader2, RefreshCw, CheckCircle2 } from 'lucide-react';
+import { LineChart, Sparkles, TrendingUp, AlertTriangle, ArrowRight, BrainCircuit, Loader2, RefreshCw, CheckCircle2, Target, ChevronRight } from 'lucide-react';
 import { EvolutionAnalysis } from '../types/patient';
+import { GASPlan, GASMeta } from '../types/eells';
 import { analyzeEvolution, evolvePBT } from '../lib/gemini';
 import { usePatients } from '../context/PatientContext';
 import ReactMarkdown from 'react-markdown';

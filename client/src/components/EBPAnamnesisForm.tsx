@@ -183,14 +183,21 @@ export const EBPAnamnesisForm: React.FC = () => {
         if (!currentPatient) return;
         setIsSaving(true);
 
-        const currentAnamnesis = currentPatient.clinicalRecords.anamnesis || {};
+        const currentAnamnesis = currentPatient.clinicalRecords.anamnesis || {
+            content: '',
+            history: [],
+            updatedAt: new Date().toISOString()
+        };
 
         updatePatient({
             ...currentPatient,
             clinicalRecords: {
                 ...currentPatient.clinicalRecords,
                 anamnesis: {
-                    ...currentAnamnesis,
+                    content: currentAnamnesis.content || '',
+                    history: currentAnamnesis.history || [],
+                    updatedAt: currentAnamnesis.updatedAt || new Date().toISOString(),
+                    structured: currentAnamnesis.structured,
                     ebp: {
                         content: ebpData,
                         updatedAt: new Date().toISOString()

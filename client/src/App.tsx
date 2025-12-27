@@ -1,6 +1,6 @@
 import React from 'react';
 import { PatientProvider, usePatients } from './context/PatientContext';
-import { PatientList } from './components/PatientList';
+import { HomePage } from './components/HomePage';
 import { ClinicalWorkspace } from './components/ClinicalWorkspace';
 import { Loader2 } from 'lucide-react';
 
@@ -22,7 +22,7 @@ const AppContent: React.FC = () => {
     return <ClinicalWorkspace />;
   }
 
-  return <PatientList />;
+  return <HomePage />;
 };
 
 function App() {

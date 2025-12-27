@@ -80,22 +80,45 @@ export const CaseFormulation: React.FC = () => {
 
             const result = await generateInitialFormulation(anamnesisText, assessments);
 
-            // Update Formulation State (Eells)
-            setFormulation(prev => ({
-                ...prev,
-                diagnosis: result.suggestedDiagnosis,
-                narrative: result.narrativeDraft,
+            // Update Formulation State (Eells) with ALL fields from AI
+            const newFormulation = {
+                ...formulation,
+                diagnosis: result.suggestedDiagnosis || formulation.diagnosis,
+                narrative: result.narrativeDraft || formulation.narrative,
+                problemList: {
+                    ...formulation.problemList,
+                    redFlags: result.problemList || formulation.problemList.redFlags,
+                    suicidality: result.suicidality === true,
+                    chemicalDependence: result.chemicalDependence === true
+                },
+                explanatoryHypothesis: {
+                    ...formulation.explanatoryHypothesis,
+                    precipitants: result.precipitants || formulation.explanatoryHypothesis.precipitants,
+                    origins: result.origins || formulation.explanatoryHypothesis.origins,
+                    resources: result.resources || formulation.explanatoryHypothesis.resources,
+                    obstacles: result.obstacles || formulation.explanatoryHypothesis.obstacles
+                },
                 treatmentPlan: {
-                    ...prev.treatmentPlan,
-                    interventions: result.guidelineRecommendations.map((g: any) => `- ${g.title}: ${g.relevance} (${g.source})`).join('\n')
+                    ...formulation.treatmentPlan,
+                    goals: result.goals || formulation.treatmentPlan.goals,
+                    interventions: result.guidelineRecommendations?.map((g: any) => `- ${g.title}: ${g.relevance} (${g.source})`).join('\n') || formulation.treatmentPlan.interventions
                 }
-                // Note: PBT data would ideally update the PBT tab, but we store it here for now or update patient directly?
-                // For now, let's update the narrative and diagnosis visible here.
-            }));
+            };
 
-            // Also update the PBT Network in the patient record if possible, or leave it for the PBT tab.
-            // Let's just notify the user via a toast or alert that PBT was also generated.
-            // For this specific 'Formulation' component, filling the text fields is the priority.
+            setFormulation(newFormulation);
+
+            // AUTO-SAVE: Save immediately after AI generation to prevent loss
+            updatePatient({
+                ...currentPatient,
+                clinicalRecords: {
+                    ...currentPatient.clinicalRecords,
+                    caseFormulation: {
+                        ...currentPatient.clinicalRecords.caseFormulation,
+                        eells: newFormulation,
+                        updatedAt: new Date().toISOString()
+                    }
+                }
+            });
 
         } catch (error) {
             console.error("Auto-fill error", error);

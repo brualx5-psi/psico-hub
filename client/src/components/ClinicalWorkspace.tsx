@@ -14,10 +14,13 @@ import { Sidebar } from './Sidebar';
 import { AnamnesisSelector } from './AnamnesisSelector';
 import { ProblemListCard } from './ProblemListCard';
 import { GoalsManager } from './GoalsManager';
-import { InterventionsPanel } from './InterventionsPanel';
+import { GASPanel } from './GASPanel';
 import { ProntuarioCRP } from './ProntuarioCRP';
 import { TreatmentPlanTab } from './TreatmentPlanTab';
 import { MonitoringDashboard } from './MonitoringDashboard';
+import { PaymentHistory } from './PaymentHistory';
+import { SessionManager } from './SessionManager';
+import { HomeworkPanel } from './HomeworkPanel';
 import {
     BrainCircuit,
     Target,
@@ -69,7 +72,7 @@ export const ClinicalWorkspace: React.FC = () => {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     // Mantive os IDs técnicos (dashboard, soap, etc) mas mudei os rótulos visuais abaixo
-    const [activeTab, setActiveTab] = useState<'dashboard' | 'soap' | 'network' | 'plan' | 'forms' | 'anamnesis' | 'formulation' | 'curation' | 'evolution' | 'alchemy' | 'copilot' | 'eells' | 'prontuario' | 'library'>('dashboard');
+    const [activeTab, setActiveTab] = useState<'dashboard' | 'soap' | 'network' | 'plan' | 'forms' | 'anamnesis' | 'formulation' | 'curation' | 'evolution' | 'alchemy' | 'copilot' | 'eells' | 'prontuario' | 'library' | 'financeiro' | 'sessoes' | 'homework'>('dashboard');
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
     if (!currentPatient) return null;
@@ -207,7 +210,7 @@ export const ClinicalWorkspace: React.FC = () => {
                     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
                         <ProblemListCard />
                         <GoalsManager />
-                        <InterventionsPanel />
+                        <GASPanel />
                     </div>
                 );
             case 'forms':
@@ -229,6 +232,12 @@ export const ClinicalWorkspace: React.FC = () => {
                 );
             case 'alchemy':
                 return <AlchemyLab />;
+            case 'financeiro':
+                return <PaymentHistory />;
+            case 'homework':
+                return <HomeworkPanel />;
+            case 'sessoes':
+                return <SessionManager />;
             case 'network':
                 // Prioritize analysis result, fallback to stored patient data
                 const pbtData = result?.pbt_network || currentPatient.clinicalRecords.sessions[0]?.pbtNetwork;
