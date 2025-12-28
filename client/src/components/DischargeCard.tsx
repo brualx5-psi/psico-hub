@@ -68,10 +68,13 @@ const CATEGORY_COLORS: Record<string, { bg: string; text: string; icon: string }
 
 export const DischargeCard: React.FC = () => {
     const { currentPatient, updatePatient } = usePatients();
-    const [activeTab, setActiveTab] = useState<'readiness' | 'prevention'>('readiness');
+    const [activeTab, setActiveTab] = useState<'readiness' | 'prevention' | 'support' | 'letter'>('readiness');
     const [showAddCriterion, setShowAddCriterion] = useState(false);
     const [showAddWarning, setShowAddWarning] = useState(false);
     const [showAddStrategy, setShowAddStrategy] = useState(false);
+    const [showAddContact, setShowAddContact] = useState(false);
+    const [newContact, setNewContact] = useState({ name: '', relationship: '', contactInfo: '', role: '' });
+    const [letterDraft, setLetterDraft] = useState({ whatWorks: '', whatHurts: '', whatToDo: '' });
 
     // Form states
     const [newCriterion, setNewCriterion] = useState({ description: '', category: 'sintomas' as DischargeCriterion['category'], weight: 2 });
@@ -343,6 +346,30 @@ export const DischargeCard: React.FC = () => {
         setShowAddStrategy(false);
     };
 
+    const addSupportContact = () => {
+        if (!newContact.name.trim() || !newContact.relationship.trim()) return;
+
+        const data = dischargeData || initializeDischargeData();
+        const contact = {
+            name: newContact.name,
+            relationship: newContact.relationship,
+            contactInfo: newContact.contactInfo || undefined,
+            role: newContact.role || undefined
+        };
+
+        saveDischargeData({
+            ...data,
+            relapsePrevention: {
+                ...data.relapsePrevention,
+                supportNetwork: [...data.relapsePrevention.supportNetwork, contact],
+                lastUpdated: new Date().toISOString()
+            }
+        });
+
+        setNewContact({ name: '', relationship: '', contactInfo: '', role: '' });
+        setShowAddContact(false);
+    };
+
     if (!currentPatient) return null;
 
     const data = dischargeData || initializeDischargeData();
@@ -388,26 +415,46 @@ export const DischargeCard: React.FC = () => {
             </div>
 
             {/* Tabs */}
-            <div className="flex border-b border-gray-100">
+            <div className="flex border-b border-gray-100 overflow-x-auto">
                 <button
                     onClick={() => setActiveTab('readiness')}
-                    className={`flex-1 py-3 text-sm font-medium transition-colors ${activeTab === 'readiness'
+                    className={`flex-1 py-3 text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'readiness'
                         ? 'text-emerald-600 border-b-2 border-emerald-600'
                         : 'text-gray-500 hover:text-gray-700'
                         }`}
                 >
                     <Target className="w-4 h-4 inline mr-1" />
-                    Critérios de Alta
+                    Critérios
                 </button>
                 <button
                     onClick={() => setActiveTab('prevention')}
-                    className={`flex-1 py-3 text-sm font-medium transition-colors ${activeTab === 'prevention'
+                    className={`flex-1 py-3 text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'prevention'
                         ? 'text-emerald-600 border-b-2 border-emerald-600'
                         : 'text-gray-500 hover:text-gray-700'
                         }`}
                 >
                     <Shield className="w-4 h-4 inline mr-1" />
-                    Prevenção de Recaída
+                    Prevenção
+                </button>
+                <button
+                    onClick={() => setActiveTab('support')}
+                    className={`flex-1 py-3 text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'support'
+                        ? 'text-emerald-600 border-b-2 border-emerald-600'
+                        : 'text-gray-500 hover:text-gray-700'
+                        }`}
+                >
+                    <Users className="w-4 h-4 inline mr-1" />
+                    Rede de Apoio
+                </button>
+                <button
+                    onClick={() => setActiveTab('letter')}
+                    className={`flex-1 py-3 text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'letter'
+                        ? 'text-emerald-600 border-b-2 border-emerald-600'
+                        : 'text-gray-500 hover:text-gray-700'
+                        }`}
+                >
+                    <FileText className="w-4 h-4 inline mr-1" />
+                    Carta
                 </button>
             </div>
 
@@ -585,6 +632,131 @@ export const DischargeCard: React.FC = () => {
                                 </div>
                             )}
                         </div>
+                    </div>
+                )}
+
+                {/* Aba Rede de Apoio */}
+                {activeTab === 'support' && (
+                    <div className="space-y-4">
+                        <div className="flex items-center justify-between mb-2">
+                            <h4 className="font-bold text-gray-700 flex items-center gap-2">
+                                <Users className="w-4 h-4 text-blue-500" />
+                                Rede de Apoio
+                            </h4>
+                            <button
+                                onClick={() => setShowAddContact(true)}
+                                className="text-sm text-emerald-600 hover:text-emerald-700 flex items-center gap-1"
+                            >
+                                <Plus className="w-3 h-3" /> Adicionar
+                            </button>
+                        </div>
+
+                        {data.relapsePrevention.supportNetwork.length === 0 ? (
+                            <p className="text-sm text-gray-400 italic text-center py-4">
+                                Nenhuma pessoa de apoio cadastrada.
+                            </p>
+                        ) : (
+                            <div className="space-y-2">
+                                {data.relapsePrevention.supportNetwork.map((contact, idx) => (
+                                    <div key={idx} className="p-3 bg-blue-50 rounded-lg border border-blue-100">
+                                        <div className="flex items-start justify-between">
+                                            <div>
+                                                <p className="font-medium text-blue-800">{contact.name}</p>
+                                                <p className="text-sm text-blue-600">{contact.relationship}</p>
+                                            </div>
+                                            {contact.contactInfo && (
+                                                <span className="text-xs text-blue-500 bg-blue-100 px-2 py-1 rounded">
+                                                    {contact.contactInfo}
+                                                </span>
+                                            )}
+                                        </div>
+                                        {contact.role && (
+                                            <p className="text-xs text-gray-600 mt-1 italic">
+                                                "{contact.role}"
+                                            </p>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        <p className="text-xs text-gray-400 mt-4">
+                            💡 Cadastre pessoas de confiança que podem ajudar em momentos difíceis.
+                        </p>
+                    </div>
+                )}
+
+                {/* Aba Carta para Si Mesmo */}
+                {activeTab === 'letter' && (
+                    <div className="space-y-4">
+                        <div className="text-center mb-4">
+                            <FileText className="w-8 h-8 mx-auto text-purple-500 mb-2" />
+                            <h4 className="font-bold text-gray-700">Carta para Si Mesmo</h4>
+                            <p className="text-sm text-gray-500">
+                                Um lembrete pessoal para momentos difíceis
+                            </p>
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                                ✅ O que funciona para mim
+                            </label>
+                            <textarea
+                                value={data.relapsePrevention.letterToSelf?.split('|||')[0] || ''}
+                                onChange={(e) => {
+                                    const parts = (data.relapsePrevention.letterToSelf || '|||').split('|||');
+                                    parts[0] = e.target.value;
+                                    const updated = { ...data };
+                                    updated.relapsePrevention.letterToSelf = parts.join('|||');
+                                    updated.relapsePrevention.lastUpdated = new Date().toISOString();
+                                    saveDischargeData(updated);
+                                }}
+                                placeholder="Ex: Fazer caminhadas, conversar com minha irmã, respirar fundo..."
+                                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm min-h-[80px]"
+                            />
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                                ⚠️ O que me derruba
+                            </label>
+                            <textarea
+                                value={data.relapsePrevention.letterToSelf?.split('|||')[1] || ''}
+                                onChange={(e) => {
+                                    const parts = (data.relapsePrevention.letterToSelf || '|||').split('|||');
+                                    parts[1] = e.target.value;
+                                    const updated = { ...data };
+                                    updated.relapsePrevention.letterToSelf = parts.join('|||');
+                                    updated.relapsePrevention.lastUpdated = new Date().toISOString();
+                                    saveDischargeData(updated);
+                                }}
+                                placeholder="Ex: Ficar muito tempo sozinho, comparações no Instagram..."
+                                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm min-h-[80px]"
+                            />
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                                🛡️ O que fazer quando notar sinais de alerta
+                            </label>
+                            <textarea
+                                value={data.relapsePrevention.letterToSelf?.split('|||')[2] || ''}
+                                onChange={(e) => {
+                                    const parts = (data.relapsePrevention.letterToSelf || '|||').split('|||');
+                                    parts[2] = e.target.value;
+                                    const updated = { ...data };
+                                    updated.relapsePrevention.letterToSelf = parts.join('|||');
+                                    updated.relapsePrevention.lastUpdated = new Date().toISOString();
+                                    saveDischargeData(updated);
+                                }}
+                                placeholder="Ex: Ligar para fulano, usar a respiração 4-7-8, sair de casa..."
+                                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm min-h-[80px]"
+                            />
+                        </div>
+
+                        <p className="text-xs text-gray-400 text-center mt-4">
+                            💜 Esta carta é um recurso pessoal para o paciente consultar quando precisar.
+                        </p>
                     </div>
                 )}
             </div>
@@ -781,6 +953,82 @@ export const DischargeCard: React.FC = () => {
                             <button
                                 onClick={addCopingStrategy}
                                 disabled={!newStrategy.description.trim()}
+                                className="flex-1 py-2 bg-blue-600 text-white rounded-lg disabled:opacity-50"
+                            >
+                                Adicionar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal Adicionar Contato */}
+            {showAddContact && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-xl max-w-md w-full p-6">
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className="font-bold text-lg">Novo Contato de Apoio</h3>
+                            <button onClick={() => setShowAddContact(false)}>
+                                <X className="w-5 h-5 text-gray-400" />
+                            </button>
+                        </div>
+
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Nome *</label>
+                                <input
+                                    type="text"
+                                    value={newContact.name}
+                                    onChange={(e) => setNewContact({ ...newContact, name: e.target.value })}
+                                    placeholder="Ex: Maria"
+                                    className="w-full px-3 py-2 border border-gray-200 rounded-lg"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Relação *</label>
+                                <input
+                                    type="text"
+                                    value={newContact.relationship}
+                                    onChange={(e) => setNewContact({ ...newContact, relationship: e.target.value })}
+                                    placeholder="Ex: Irmã, Amigo, Cônjuge"
+                                    className="w-full px-3 py-2 border border-gray-200 rounded-lg"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Forma de Contato</label>
+                                <input
+                                    type="text"
+                                    value={newContact.contactInfo}
+                                    onChange={(e) => setNewContact({ ...newContact, contactInfo: e.target.value })}
+                                    placeholder="Ex: WhatsApp, Telefone, Mora perto"
+                                    className="w-full px-3 py-2 border border-gray-200 rounded-lg"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">O que essa pessoa pode fazer</label>
+                                <input
+                                    type="text"
+                                    value={newContact.role}
+                                    onChange={(e) => setNewContact({ ...newContact, role: e.target.value })}
+                                    placeholder="Ex: Conversar quando eu estiver ansioso"
+                                    className="w-full px-3 py-2 border border-gray-200 rounded-lg"
+                                />
+                            </div>
+                        </div>
+
+                        <div className="flex gap-3 mt-6">
+                            <button
+                                onClick={() => setShowAddContact(false)}
+                                className="flex-1 py-2 bg-gray-100 text-gray-700 rounded-lg"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                onClick={addSupportContact}
+                                disabled={!newContact.name.trim() || !newContact.relationship.trim()}
                                 className="flex-1 py-2 bg-blue-600 text-white rounded-lg disabled:opacity-50"
                             >
                                 Adicionar
