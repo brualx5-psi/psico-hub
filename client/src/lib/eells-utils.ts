@@ -17,43 +17,123 @@ export function calculateEellsProgress(patient: Patient): EellsProgress {
         currentPhase: 'assessment'
     };
 
-    // 1. ASSESSMENT (0-100%)
+    // 1. ASSESSMENT (0-100%) - Nova lógica com N/A
     let assessmentScore = 0;
+    const eellsAssessment = (patient as any).eellsData?.assessment;
+
+    // 30% - Anamnese preenchida
     if (patient.clinicalRecords.anamnesis.content) {
-        assessmentScore += 50; // Anamnese preenchida
+        assessmentScore += 30;
     }
+
+    // 20% - Fontes externas (ou N/A)
+    if (eellsAssessment?.externalSourcesNA ||
+        (eellsAssessment?.externalSources?.length > 0)) {
+        assessmentScore += 20;
+    }
+
+    // 30% - Avaliação inicial
     if (patient.clinicalRecords.assessments.length > 0) {
-        assessmentScore += 50; // Pelo menos 1 avaliação
+        assessmentScore += 30;
     }
+
+    // 20% - Cronograma definido com frequência (ou N/A)
+    const hasValidSchedule = eellsAssessment?.schedule?.core?.instruments?.length > 0
+        && eellsAssessment?.schedule?.core?.frequency;
+    if (eellsAssessment?.scheduleNA || hasValidSchedule) {
+        assessmentScore += 20;
+    }
+
     progress.assessment = assessmentScore;
 
-    // 2. PROBLEM LIST (0-100%)
+    // 2. PROBLEM LIST (0-100%) - Nova lógica com prioridade e acordo
+    let problemListScore = 0;
     const eellsData = (patient as any).eellsData;
-    if (eellsData?.problemList?.length > 0) {
-        progress.problemList = 100;
+    const problems = eellsData?.problemList || [];
+    const activeProblems = problems.filter((p: any) => p.status === 'active');
+
+    // 40% - Ter problemas ativos identificados
+    if (activeProblems.length > 0) {
+        problemListScore += 40;
     }
 
-    // 3. MECHANISMS (0-100%)
+    // 30% - Ter prioridades coerentes:
+    // - pelo menos 1 problema com priorityRank
+    // - sem ranks duplicados entre problemas ativos
+    // - pelo menos 1 isFocus OU menor rank é automaticamente foco
+    const rankedProblems = activeProblems.filter((p: any) => p.priorityRank != null);
+    const ranks = rankedProblems.map((p: any) => p.priorityRank);
+    const uniqueRanks = new Set(ranks);
+    const noDuplicateRanks = ranks.length === uniqueRanks.size;
+    const hasFocus = activeProblems.some((p: any) => p.isFocus);
+
+    const hasValidPriorities = rankedProblems.length > 0 && noDuplicateRanks && (hasFocus || rankedProblems.length > 0);
+    if (hasValidPriorities) {
+        problemListScore += 30;
+    }
+
+    // 30% - Acordo terapeuta-cliente revisado
+    const agreement = eellsData?.problemListAgreement?.sharedUnderstanding;
+    if (agreement?.reviewed && agreement?.agreement) {
+        problemListScore += 30;
+    }
+
+    progress.problemList = problemListScore;
+
+    // 3. MECHANISMS (0-100%) - Nova lógica com 4 quadrantes + processos + evidência
     let mechanismsScore = 0;
-    // Verifica se tem rede PBT em alguma sessão
+    const mechanisms = eellsData?.mechanisms;
+
+    // 40% - Quadrantes com pelo menos 1 item cada OU N/A justificado (min 10 chars)
+    const checkQuadrant = (items: any[], na?: boolean, reason?: string) => {
+        if (items?.length > 0) return true;
+        if (na && reason?.trim()?.length >= 10) return true;
+        return false;
+    };
+
+    const precipitantsOk = checkQuadrant(mechanisms?.precipitants, mechanisms?.precipitantsNA, mechanisms?.precipitantsNAReason);
+    const originsOk = checkQuadrant(mechanisms?.origins, mechanisms?.originsNA, mechanisms?.originsNAReason);
+    const resourcesOk = checkQuadrant(mechanisms?.resources, mechanisms?.resourcesNA, mechanisms?.resourcesNAReason);
+    const obstaclesOk = checkQuadrant(mechanisms?.obstacles, mechanisms?.obstaclesNA, mechanisms?.obstaclesNAReason);
+
+    if (precipitantsOk && originsOk && resourcesOk && obstaclesOk) {
+        mechanismsScore += 40;
+    }
+
+    // 30% - maintainingProcesses.length > 0 E (coreBeliefs.length > 0 OU observablePatterns.length > 0)
+    const hasProcesses = mechanisms?.maintainingProcesses?.length > 0;
+    const hasBeliefsOrPatterns = (mechanisms?.coreBeliefs?.length > 0) || (mechanisms?.observablePatterns?.length > 0);
+    if (hasProcesses && hasBeliefsOrPatterns) {
+        mechanismsScore += 30;
+    }
+
+    // 30% - Qualquer evidência vinculada (PBT OU notas OU instrumentos OU fontes externas)
     const hasPBT = patient.clinicalRecords.sessions.some(s => s.pbtNetwork?.nodes?.length > 0);
-    if (hasPBT) {
-        mechanismsScore += 50;
+    const evidenceLinks = mechanisms?.evidenceLinks;
+    const hasAnyEvidence = hasPBT || evidenceLinks?.hasPbtNetwork || evidenceLinks?.hasClinicalNotes ||
+        evidenceLinks?.hasInstruments || evidenceLinks?.hasExternalSources;
+    if (hasAnyEvidence) {
+        mechanismsScore += 30;
     }
-    if (eellsData?.mechanisms?.coreBeliefs?.length > 0) {
-        mechanismsScore += 50;
-    }
+
     progress.mechanisms = mechanismsScore;
 
-    // 4. FORMULATION (0-100%)
+    // 4. FORMULATION (0-100%) - Narrativa + Diagnóstico
     let formulationScore = 0;
-    const formulation = eellsData?.formulation;
-    if (formulation) {
-        if (formulation.precipitants?.length > 0) formulationScore += 25;
-        if (formulation.origins?.length > 0) formulationScore += 25;
-        if (formulation.strengths?.length > 0) formulationScore += 25;
-        if (formulation.coreHypothesis) formulationScore += 25;
+    const formulationV2 = eellsData?.formulationV2;
+
+    // 50% - explanatoryNarrative com trim().length > 100
+    if (formulationV2?.explanatoryNarrative?.trim()?.length > 100) {
+        formulationScore += 50;
     }
+
+    // 50% - Diagnóstico preenchido OU N/A justificado (min 10 chars)
+    const hasDiagnosis = formulationV2?.primaryDiagnosis?.trim()?.length > 0;
+    const diagnosisNAValid = formulationV2?.diagnosisNA && formulationV2?.diagnosisNAReason?.trim()?.length >= 10;
+    if (hasDiagnosis || diagnosisNAValid) {
+        formulationScore += 50;
+    }
+
     progress.formulation = formulationScore;
 
     // 5. TREATMENT (0-100%)
@@ -129,27 +209,93 @@ export function getNextRecommendedAction(patient: Patient): string {
     const progress = calculateEellsProgress(patient);
 
     if (progress.assessment < 100) {
+        const eellsAssessment = (patient as any).eellsData?.assessment;
+
         if (!patient.clinicalRecords.anamnesis.content) {
             return 'Preencher Anamnese estruturada';
         }
+
+        const hasExternalSources = eellsAssessment?.externalSourcesNA ||
+            (eellsAssessment?.externalSources?.length > 0);
+        if (!hasExternalSources) {
+            return 'Registrar fontes externas (ou marcar N/A)';
+        }
+
         if (patient.clinicalRecords.assessments.length === 0) {
             return 'Aplicar avaliação inicial (GAD-7, PHQ-9, etc)';
+        }
+
+        const hasValidSchedule = eellsAssessment?.schedule?.core?.instruments?.length > 0
+            && eellsAssessment?.schedule?.core?.frequency;
+        if (!eellsAssessment?.scheduleNA && !hasValidSchedule) {
+            return 'Definir cronograma de reavaliações (ou marcar N/A)';
         }
     }
 
     if (progress.problemList < 100) {
-        return 'Criar Lista de Problemas a partir das sessões';
+        const problems = (patient as any).eellsData?.problemList || [];
+        const agreement = (patient as any).eellsData?.problemListAgreement?.sharedUnderstanding;
+
+        if (problems.length === 0) {
+            return 'Criar Lista de Problemas a partir das sessões';
+        }
+
+        const hasPriorities = problems.some((p: any) => p.priorityRank || p.isFocus);
+        if (!hasPriorities) {
+            return 'Definir prioridades na Lista de Problemas';
+        }
+
+        if (!agreement?.reviewed || !agreement?.agreement) {
+            return 'Revisar Lista de Problemas com o paciente';
+        }
     }
 
     if (progress.mechanisms < 100) {
-        if (!patient.clinicalRecords.sessions.some(s => s.pbtNetwork?.nodes?.length > 0)) {
-            return 'Realizar sessão e gerar Rede PBT';
+        const mechanisms = (patient as any).eellsData?.mechanisms;
+
+        // Verificar quadrantes
+        const checkQ = (items: any[], na?: boolean, reason?: string) =>
+            items?.length > 0 || (na && reason?.trim()?.length >= 10);
+
+        if (!checkQ(mechanisms?.precipitants, mechanisms?.precipitantsNA, mechanisms?.precipitantsNAReason)) {
+            return 'Preencher Precipitantes (ou marcar N/A com justificativa)';
         }
-        return 'Identificar Crenças Nucleares';
+        if (!checkQ(mechanisms?.origins, mechanisms?.originsNA, mechanisms?.originsNAReason)) {
+            return 'Preencher Origens (ou marcar N/A com justificativa)';
+        }
+        if (!checkQ(mechanisms?.resources, mechanisms?.resourcesNA, mechanisms?.resourcesNAReason)) {
+            return 'Identificar Recursos/Forças (ou marcar N/A)';
+        }
+        if (!checkQ(mechanisms?.obstacles, mechanisms?.obstaclesNA, mechanisms?.obstaclesNAReason)) {
+            return 'Identificar Obstáculos (ou marcar N/A)';
+        }
+
+        // Verificar processos + crenças
+        const hasProcesses = mechanisms?.maintainingProcesses?.length > 0;
+        const hasBeliefsOrPatterns = mechanisms?.coreBeliefs?.length > 0 || mechanisms?.observablePatterns?.length > 0;
+        if (!hasProcesses) {
+            return 'Identificar Processos Mantenedores';
+        }
+        if (!hasBeliefsOrPatterns) {
+            return 'Identificar Crenças ou Padrões Observáveis';
+        }
+
+        // Verificar evidência
+        return 'Vincular evidências (PBT, notas, instrumentos)';
     }
 
     if (progress.formulation < 100) {
-        return 'Completar Formulação de Caso (Eells)';
+        const formulationV2 = (patient as any).eellsData?.formulationV2;
+
+        if (!formulationV2?.explanatoryNarrative?.trim() || formulationV2.explanatoryNarrative.trim().length <= 100) {
+            return 'Escrever Narrativa Explicativa (síntese causal)';
+        }
+
+        const hasDiagnosis = formulationV2?.primaryDiagnosis?.trim()?.length > 0;
+        const diagnosisNAValid = formulationV2?.diagnosisNA && formulationV2?.diagnosisNAReason?.trim()?.length >= 10;
+        if (!hasDiagnosis && !diagnosisNAValid) {
+            return 'Registrar Diagnóstico (ou marcar N/A com justificativa)';
+        }
     }
 
     if (progress.treatment < 100) {
@@ -184,27 +330,86 @@ export function getNextRecommendedActionWithTab(patient: Patient): { action: str
     const progress = calculateEellsProgress(patient);
 
     if (progress.assessment < 100) {
+        const eellsAssessment = (patient as any).eellsData?.assessment;
+
         if (!patient.clinicalRecords.anamnesis.content) {
             return { action: 'Preencher Anamnese estruturada', targetTab: 'anamnesis' };
         }
+
+        // Verificar fontes externas
+        const hasExternalSources = eellsAssessment?.externalSourcesNA ||
+            (eellsAssessment?.externalSources?.length > 0);
+        if (!hasExternalSources) {
+            return { action: 'Registrar fontes externas (ou marcar N/A)', targetTab: 'anamnesis' };
+        }
+
         if (patient.clinicalRecords.assessments.length === 0) {
             return { action: 'Aplicar avaliação inicial (GAD-7, PHQ-9, etc)', targetTab: 'forms' };
+        }
+
+        // Verificar cronograma
+        const hasValidSchedule = eellsAssessment?.schedule?.core?.instruments?.length > 0
+            && eellsAssessment?.schedule?.core?.frequency;
+        if (!eellsAssessment?.scheduleNA && !hasValidSchedule) {
+            return { action: 'Definir cronograma de reavaliações (ou marcar N/A)', targetTab: 'forms' };
         }
     }
 
     if (progress.problemList < 100) {
-        return { action: 'Criar Lista de Problemas a partir das sessões', targetTab: 'eells' };
+        const problems = (patient as any).eellsData?.problemList || [];
+        const agreement = (patient as any).eellsData?.problemListAgreement?.sharedUnderstanding;
+
+        if (problems.length === 0) {
+            return { action: 'Criar Lista de Problemas a partir das sessões', targetTab: 'eells' };
+        }
+
+        const hasPriorities = problems.some((p: any) => p.priorityRank || p.isFocus);
+        if (!hasPriorities) {
+            return { action: 'Definir prioridades na Lista de Problemas', targetTab: 'eells' };
+        }
+
+        if (!agreement?.reviewed || !agreement?.agreement) {
+            return { action: 'Revisar Lista de Problemas com o paciente', targetTab: 'eells' };
+        }
     }
 
     if (progress.mechanisms < 100) {
-        if (!patient.clinicalRecords.sessions.some(s => s.pbtNetwork?.nodes?.length > 0)) {
-            return { action: 'Gerar Rede PBT (Ir para Anamnese e usar IA)', targetTab: 'anamnesis' };
+        const mechanisms = (patient as any).eellsData?.mechanisms;
+
+        const checkQ = (items: any[], na?: boolean, reason?: string) =>
+            items?.length > 0 || (na && reason?.trim()?.length >= 10);
+
+        if (!checkQ(mechanisms?.precipitants, mechanisms?.precipitantsNA, mechanisms?.precipitantsNAReason)) {
+            return { action: 'Preencher Precipitantes', targetTab: 'formulation' };
         }
-        return { action: 'Identificar Crenças Nucleares', targetTab: 'network' };
+        if (!checkQ(mechanisms?.origins, mechanisms?.originsNA, mechanisms?.originsNAReason)) {
+            return { action: 'Preencher Origens', targetTab: 'formulation' };
+        }
+        if (!checkQ(mechanisms?.resources, mechanisms?.resourcesNA, mechanisms?.resourcesNAReason)) {
+            return { action: 'Identificar Recursos/Forças', targetTab: 'formulation' };
+        }
+        if (!checkQ(mechanisms?.obstacles, mechanisms?.obstaclesNA, mechanisms?.obstaclesNAReason)) {
+            return { action: 'Identificar Obstáculos', targetTab: 'formulation' };
+        }
+
+        if (!mechanisms?.maintainingProcesses?.length) {
+            return { action: 'Identificar Processos Mantenedores', targetTab: 'formulation' };
+        }
+        if (!(mechanisms?.coreBeliefs?.length > 0 || mechanisms?.observablePatterns?.length > 0)) {
+            return { action: 'Identificar Crenças ou Padrões', targetTab: 'formulation' };
+        }
+
+        return { action: 'Vincular evidências (PBT, notas)', targetTab: 'formulation' };
     }
 
     if (progress.formulation < 100) {
-        return { action: 'Completar Formulação de Caso (Eells)', targetTab: 'formulation' };
+        const formulationV2 = (patient as any).eellsData?.formulationV2;
+
+        if (!formulationV2?.explanatoryNarrative?.trim() || formulationV2.explanatoryNarrative.trim().length <= 100) {
+            return { action: 'Escrever Narrativa Explicativa', targetTab: 'formulation' };
+        }
+
+        return { action: 'Registrar Diagnóstico', targetTab: 'formulation' };
     }
 
     if (progress.treatment < 100) {

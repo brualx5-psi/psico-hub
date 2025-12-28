@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { usePatients } from '../context/PatientContext';
 import {
     Target,
@@ -14,10 +14,13 @@ import {
     Trash2,
     Save,
     X,
-    FileUp
+    FileUp,
+    History,
+    Check
 } from 'lucide-react';
 import { recommendProtocols, generateClinicalAnalysisMultiPdf } from '../lib/gemini';
 import type { TreatmentPhase, TreatmentSession, ClinicalAnalysis } from '../types/treatment-plan';
+import { TreatmentPlanHistoryEntry, TREATMENT_CHANGE_REASONS, Intervention, Goal } from '../types/eells';
 
 const DEFAULT_PHASES: TreatmentPhase[] = [
     {
@@ -45,7 +48,7 @@ const DEFAULT_PHASES: TreatmentPhase[] = [
 ];
 
 export const TreatmentPlanTab: React.FC = () => {
-    const { currentPatient } = usePatients();
+    const { currentPatient, updatePatient } = usePatients();
     const [expandedPhases, setExpandedPhases] = useState<string[]>([]);
     const [isGeneratingAnalysis, setIsGeneratingAnalysis] = useState(false);
     const [currentAnalysis, setCurrentAnalysis] = useState<ClinicalAnalysis | null>(null);
@@ -62,6 +65,19 @@ export const TreatmentPlanTab: React.FC = () => {
     const [isSearchingProtocols, setIsSearchingProtocols] = useState(false);
     const [protocolRecommendations, setProtocolRecommendations] = useState<any>(null);
     const [showRecommendationsModal, setShowRecommendationsModal] = useState(false);
+
+    // Revision modal state
+    const [showRevisionModal, setShowRevisionModal] = useState(false);
+    const [revisionReason, setRevisionReason] = useState('');
+    const [selectedQuickReason, setSelectedQuickReason] = useState<string>('');
+    const [revisionChangeType, setRevisionChangeType] = useState<'goal' | 'intervention' | 'both' | 'review' | 'other'>('both');
+
+    // Load treatment plan from patient
+    useEffect(() => {
+        if (currentPatient?.eellsData?.treatmentPlan) {
+            // Could load saved phases here if stored
+        }
+    }, [currentPatient]);
 
     const handlePdfUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const files = e.target.files;
@@ -183,6 +199,67 @@ export const TreatmentPlanTab: React.FC = () => {
         }
     };
 
+    // Save treatment plan revision with history
+    const handleSaveRevision = () => {
+        if (!currentPatient) return;
+
+        const finalReason = selectedQuickReason || revisionReason;
+        if (finalReason.trim().length < 10) {
+            alert('Motivo da revisão deve ter pelo menos 10 caracteres');
+            return;
+        }
+
+        const now = new Date().toISOString();
+        const existingPlan = (currentPatient as any).eellsData?.treatmentPlan;
+        const existingHistory = existingPlan?.history || [];
+
+        // Create snapshot
+        const goals = existingPlan?.goals || [];
+        const interventions = existingPlan?.interventions || [];
+
+        const snapshot = {
+            goalsCount: goals.length,
+            goalsDescriptions: goals.map((g: Goal) => g.description),
+            goalsStatuses: goals.map((g: Goal) => g.status),
+            interventionsCount: interventions.length,
+            interventionNames: interventions.map((i: Intervention) => i.name),
+            targetNodes: interventions.flatMap((i: Intervention) => i.targetNodes || [])
+        };
+
+        // Create history entry
+        const historyEntry: TreatmentPlanHistoryEntry = {
+            id: crypto.randomUUID(),
+            date: now,
+            snapshot,
+            changeReason: finalReason,
+            changeType: revisionChangeType,
+            changedBy: 'terapeuta'
+        };
+
+        // Update patient
+        updatePatient({
+            ...currentPatient,
+            eellsData: {
+                ...(currentPatient as any).eellsData,
+                treatmentPlan: {
+                    ...existingPlan,
+                    history: [historyEntry, ...existingHistory].slice(0, 20),
+                    reviewedAt: now,
+                    lastUpdated: now.split('T')[0]
+                }
+            }
+        } as any);
+
+        // Reset modal
+        setShowRevisionModal(false);
+        setRevisionReason('');
+        setSelectedQuickReason('');
+        setRevisionChangeType('both');
+    };
+
+    // Get history count
+    const historyCount = (currentPatient as any)?.eellsData?.treatmentPlan?.history?.length || 0;
+
     if (!currentPatient) {
         return <div className="flex items-center justify-center h-64"><p className="text-gray-500">Selecione um paciente</p></div>;
     }
@@ -210,6 +287,16 @@ export const TreatmentPlanTab: React.FC = () => {
                         <button onClick={handleGenerateAnalysis} disabled={isGeneratingAnalysis} className="flex items-center gap-2 px-3 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg font-semibold text-sm disabled:opacity-50">
                             {isGeneratingAnalysis ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
                             Análise Clínica IA
+                        </button>
+                        <button
+                            onClick={() => setShowRevisionModal(true)}
+                            className="flex items-center gap-2 px-3 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg font-semibold text-sm"
+                        >
+                            <History className="w-4 h-4" />
+                            Salvar Revisão
+                            {historyCount > 0 && (
+                                <span className="bg-teal-800 px-1.5 py-0.5 rounded text-xs">{historyCount}</span>
+                            )}
                         </button>
                     </div>
                 </div>
@@ -446,6 +533,106 @@ export const TreatmentPlanTab: React.FC = () => {
                         <div className="p-4 border-t flex justify-end gap-3">
                             <button onClick={() => setShowRecommendationsModal(false)} className="px-4 py-2 bg-gray-200 rounded-lg">Fechar</button>
                             <button onClick={() => setShowRecommendationsModal(false)} className="px-4 py-2 bg-amber-500 text-white rounded-lg font-semibold">Usar na Análise</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Revision Modal */}
+            {showRevisionModal && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-2xl max-w-lg w-full p-6">
+                        <div className="flex items-center gap-3 mb-6">
+                            <div className="w-12 h-12 bg-teal-100 rounded-xl flex items-center justify-center">
+                                <History className="w-6 h-6 text-teal-600" />
+                            </div>
+                            <div>
+                                <h2 className="text-xl font-bold">Salvar Revisão do Plano</h2>
+                                <p className="text-sm text-gray-500">Registre o motivo da alteração para rastreabilidade clínica</p>
+                            </div>
+                        </div>
+
+                        {/* Quick Reasons */}
+                        <div className="mb-4">
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Motivo rápido:</label>
+                            <div className="flex flex-wrap gap-2">
+                                {TREATMENT_CHANGE_REASONS.map((reason) => (
+                                    <button
+                                        key={reason}
+                                        onClick={() => {
+                                            setSelectedQuickReason(reason);
+                                            setRevisionReason('');
+                                        }}
+                                        className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${selectedQuickReason === reason
+                                                ? 'bg-teal-600 text-white'
+                                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                            }`}
+                                    >
+                                        {reason}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Custom Reason */}
+                        <div className="mb-4">
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                Ou descreva (mín. 10 caracteres):
+                            </label>
+                            <textarea
+                                value={revisionReason}
+                                onChange={(e) => {
+                                    setRevisionReason(e.target.value);
+                                    setSelectedQuickReason('');
+                                }}
+                                placeholder="Ex: Paciente apresentou melhora significativa nas últimas sessões..."
+                                className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm min-h-[80px]"
+                            />
+                            <p className="text-xs text-gray-400 mt-1">
+                                {(selectedQuickReason || revisionReason).length}/10 caracteres
+                            </p>
+                        </div>
+
+                        {/* Change Type */}
+                        <div className="mb-6">
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Tipo de mudança:</label>
+                            <div className="flex gap-2">
+                                {[
+                                    { value: 'goal', label: 'Metas' },
+                                    { value: 'intervention', label: 'Intervenções' },
+                                    { value: 'both', label: 'Ambos' },
+                                    { value: 'review', label: 'Revisão' },
+                                ].map((opt) => (
+                                    <button
+                                        key={opt.value}
+                                        onClick={() => setRevisionChangeType(opt.value as any)}
+                                        className={`px-3 py-1.5 rounded-lg text-sm font-medium ${revisionChangeType === opt.value
+                                                ? 'bg-indigo-600 text-white'
+                                                : 'bg-gray-100 text-gray-700'
+                                            }`}
+                                    >
+                                        {opt.label}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Actions */}
+                        <div className="flex gap-3">
+                            <button
+                                onClick={() => setShowRevisionModal(false)}
+                                className="flex-1 px-4 py-3 bg-gray-100 text-gray-700 rounded-xl font-semibold"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                onClick={handleSaveRevision}
+                                disabled={(selectedQuickReason || revisionReason).length < 10}
+                                className="flex-1 px-4 py-3 bg-teal-600 hover:bg-teal-700 text-white rounded-xl font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                            >
+                                <Check className="w-5 h-5" />
+                                Salvar Revisão
+                            </button>
                         </div>
                     </div>
                 </div>

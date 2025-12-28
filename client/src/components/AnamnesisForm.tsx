@@ -3,6 +3,9 @@ import { usePatients } from '../context/PatientContext';
 import { Save, FileText, Sparkles, Loader2, Cloud, CloudOff, BrainCircuit, ArrowRight } from 'lucide-react';
 import { generateInitialFormulation, generatePBTNodesFromAnamnesis } from '../lib/gemini';
 import { useNavigation } from '../context/NavigationContext';
+import { ExternalSourcesPanel } from './ExternalSourcesPanel';
+import { AssessmentScheduleCard } from './AssessmentScheduleCard';
+import { ExternalSource, AssessmentSchedule } from '../types/eells';
 
 const DEFAULT_TOPICS = [
     {
@@ -165,6 +168,14 @@ export const AnamnesisForm: React.FC = () => {
     const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
     const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
 
+    // External Sources States
+    const [externalSources, setExternalSources] = useState<ExternalSource[]>([]);
+    const [externalSourcesNA, setExternalSourcesNA] = useState(false);
+
+    // Assessment Schedule States
+    const [schedule, setSchedule] = useState<AssessmentSchedule | undefined>(undefined);
+    const [scheduleNA, setScheduleNA] = useState(false);
+
     // Initial Load
     useEffect(() => {
         if (currentPatient?.clinicalRecords.anamnesis.content) {
@@ -174,7 +185,16 @@ export const AnamnesisForm: React.FC = () => {
                 setLastSavedAt(new Date(currentPatient.clinicalRecords.anamnesis.updatedAt));
             } catch { /* Handle legacy text */ }
         }
-    }, [currentPatient]);
+
+        // Load external sources and schedule from eellsData
+        const eellsAssessment = (currentPatient as any)?.eellsData?.assessment;
+        if (eellsAssessment) {
+            setExternalSources(eellsAssessment.externalSources || []);
+            setExternalSourcesNA(eellsAssessment.externalSourcesNA || false);
+            setSchedule(eellsAssessment.schedule);
+            setScheduleNA(eellsAssessment.scheduleNA || false);
+        }
+    }, [currentPatient?.id]);
 
     // Auto-Save Effect (Debounce 2s)
     useEffect(() => {
@@ -204,7 +224,11 @@ export const AnamnesisForm: React.FC = () => {
         setIsSaving(true);
         console.log("💾 Auto-saving Anamnesis...");
 
-        updatePatient({
+        // Prepare eellsData with external sources
+        const existingEellsData = (currentPatient as any).eellsData || {};
+        const existingAssessment = existingEellsData.assessment || {};
+
+        const updatedPatient = {
             ...currentPatient,
             clinicalRecords: {
                 ...currentPatient.clinicalRecords,
@@ -213,8 +237,24 @@ export const AnamnesisForm: React.FC = () => {
                     content: JSON.stringify(anamnesisData),
                     updatedAt: new Date().toISOString()
                 }
+            },
+            eellsData: {
+                ...existingEellsData,
+                assessment: {
+                    ...existingAssessment,
+                    anamnesisCompleted: Object.keys(anamnesisData).length > 0,
+                    anamnesisDate: existingAssessment.anamnesisDate || new Date().toISOString().split('T')[0],
+                    externalSources: externalSources,
+                    externalSourcesNA: externalSourcesNA,
+                    schedule: schedule,
+                    scheduleNA: scheduleNA,
+                    initialAssessments: existingAssessment.initialAssessments || [],
+                    lastUpdated: new Date().toISOString().split('T')[0]
+                }
             }
-        });
+        };
+
+        updatePatient(updatedPatient as any);
 
         // Simulate short delay for visual feedback, then reset states
         setTimeout(() => {
@@ -229,7 +269,27 @@ export const AnamnesisForm: React.FC = () => {
         setHasUnsavedChanges(true); // Flag change
     };
 
+    // Handlers for external sources
+    const handleExternalSourcesChange = (sources: ExternalSource[]) => {
+        setExternalSources(sources);
+        setHasUnsavedChanges(true);
+    };
 
+    const handleExternalSourcesNAChange = (isNA: boolean) => {
+        setExternalSourcesNA(isNA);
+        setHasUnsavedChanges(true);
+    };
+
+    // Handlers for assessment schedule
+    const handleScheduleChange = (newSchedule: AssessmentSchedule) => {
+        setSchedule(newSchedule);
+        setHasUnsavedChanges(true);
+    };
+
+    const handleScheduleNAChange = (isNA: boolean) => {
+        setScheduleNA(isNA);
+        setHasUnsavedChanges(true);
+    };
 
     // Gerar Processos PBT a partir da Anamnese
     const handleGeneratePBTNodes = async () => {
@@ -372,6 +432,22 @@ export const AnamnesisForm: React.FC = () => {
                     </div>
                 ))}
             </div>
+
+            {/* External Sources Panel */}
+            <ExternalSourcesPanel
+                sources={externalSources}
+                isNA={externalSourcesNA}
+                onSourcesChange={handleExternalSourcesChange}
+                onNAChange={handleExternalSourcesNAChange}
+            />
+
+            {/* Assessment Schedule Card (MBC) */}
+            <AssessmentScheduleCard
+                schedule={schedule}
+                isNA={scheduleNA}
+                onScheduleChange={handleScheduleChange}
+                onNAChange={handleScheduleNAChange}
+            />
 
             {/* Guidance for Next Steps */}
             {Object.keys(anamnesisData).length > 2 && (

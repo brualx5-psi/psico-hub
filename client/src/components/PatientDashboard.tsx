@@ -7,7 +7,11 @@ import { SessionPlanner } from './SessionPlanner';
 import { TopicAlignmentCard } from './TopicAlignmentCard';
 import { EellsRoadmap } from './EellsRoadmap';
 import { MonitoringCard } from './MonitoringCard';
-import { Send, Loader2, Bot, History, BrainCircuit, ChevronRight, ChevronLeft, MessageCircle } from 'lucide-react';
+import { AlertCard } from './AlertCard';
+import { ProgressChart } from './ProgressChart';
+import { DecisionLogCard } from './DecisionLogCard';
+import { ActiveHypothesis } from './ActiveHypothesis';
+import { Send, Loader2, Bot, History, BrainCircuit, ChevronRight, ChevronLeft, MessageCircle, Mic, MicOff } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 
 interface ChatMessage {
@@ -20,6 +24,11 @@ export const PatientDashboard: React.FC<{ activeTab: string }> = ({ activeTab })
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+
+    // Estados para reconhecimento de voz
+    const [isListening, setIsListening] = useState(false);
+    const [speechSupported, setSpeechSupported] = useState(false);
+    const recognitionRef = useRef<any>(null);
 
     // Controles de Visualização
     const [isChatCollapsed, setIsChatCollapsed] = useState(true);
@@ -61,6 +70,67 @@ Tenho acesso a todo o histórico. Pergunte coisas como:
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages]);
+
+    // Configurar Web Speech API
+    useEffect(() => {
+        const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+        if (SpeechRecognition) {
+            setSpeechSupported(true);
+            const recognition = new SpeechRecognition();
+            recognition.lang = 'pt-BR';
+            recognition.continuous = false;
+            recognition.interimResults = true;
+
+            recognition.onresult = (event: any) => {
+                const transcript = Array.from(event.results)
+                    .map((result: any) => result[0])
+                    .map((result: any) => result.transcript)
+                    .join('');
+                setInput(transcript);
+            };
+
+            recognition.onend = () => {
+                setIsListening(false);
+            };
+
+            recognition.onerror = (event: any) => {
+                console.error('Speech recognition error:', event.error);
+                setIsListening(false);
+            };
+
+            recognitionRef.current = recognition;
+        }
+
+        return () => {
+            if (recognitionRef.current) {
+                recognitionRef.current.abort();
+            }
+        };
+    }, []);
+
+    // Funções de controle do microfone
+    const startListening = () => {
+        if (recognitionRef.current && !isListening) {
+            setIsListening(true);
+            recognitionRef.current.start();
+        }
+    };
+
+    const stopListening = () => {
+        if (recognitionRef.current && isListening) {
+            recognitionRef.current.stop();
+            setIsListening(false);
+        }
+    };
+
+    const toggleListening = () => {
+        if (isListening) {
+            stopListening();
+        } else {
+            startListening();
+        }
+    };
 
     const handleSendMessage = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -177,6 +247,12 @@ RELATO BRUTO: ${s.notes}
             <main className="flex-1 h-full overflow-y-auto p-4 custom-scrollbar scroll-smooth min-w-0">
                 <div className="max-w-7xl mx-auto space-y-6 pb-20">
 
+                    {/* LINHA 0: Alertas de Monitoramento (Prioridade máxima) */}
+                    <AlertCard />
+
+                    {/* LINHA 0.5: Hipótese em Teste (Supervisor automático) */}
+                    <ActiveHypothesis />
+
                     {/* LINHA 1: Eells (Maior) + Monitoramento (Menor) */}
                     {/* ALTERADO: xl:grid-cols-12 para 2xl:grid-cols-12 para empilhar antes */}
                     <div className="grid grid-cols-1 2xl:grid-cols-12 gap-6">
@@ -197,6 +273,12 @@ RELATO BRUTO: ${s.notes}
                             <SessionPlanner />
                         </div>
                     </div>
+
+                    {/* LINHA 2.5: Gráfico de Progresso */}
+                    <ProgressChart />
+
+                    {/* LINHA 2.6: Decisões Clínicas */}
+                    <DecisionLogCard />
 
                     {/* LINHA 3: Rede PBT (Com altura garantida) */}
                     <div className="bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col relative overflow-hidden min-h-[500px]">
@@ -283,21 +365,51 @@ RELATO BRUTO: ${s.notes}
                         </div>
 
                         <form onSubmit={handleSendMessage} className="p-3 bg-white border-t border-gray-200">
-                            <div className="relative">
-                                <input
-                                    type="text"
-                                    value={input}
-                                    onChange={(e) => setInput(e.target.value)}
-                                    placeholder="Ex: Qual a tendência do humor?"
-                                    className="w-full pl-4 pr-12 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none text-sm transition-all"
-                                    disabled={isLoading}
-                                />
+                            {/* Indicador de gravação */}
+                            {isListening && (
+                                <div className="flex items-center gap-2 mb-2 px-2 py-1 bg-red-50 border border-red-200 rounded-lg">
+                                    <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+                                    <span className="text-xs text-red-600 font-medium">Ouvindo... Fale agora</span>
+                                </div>
+                            )}
+                            <div className="flex items-center gap-2">
+                                <div className="relative flex-1">
+                                    <input
+                                        type="text"
+                                        value={input}
+                                        onChange={(e) => setInput(e.target.value)}
+                                        placeholder={isListening ? "🎤 Dite sua mensagem..." : "Ex: Qual a tendência do humor?"}
+                                        className={`w-full pl-4 pr-4 py-3 border rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none text-sm transition-all ${isListening
+                                            ? 'bg-red-50 border-red-300'
+                                            : 'bg-gray-50 border-gray-200'
+                                            }`}
+                                        disabled={isLoading}
+                                    />
+                                </div>
+
+                                {/* Botão de Microfone */}
+                                {speechSupported && (
+                                    <button
+                                        type="button"
+                                        onClick={toggleListening}
+                                        disabled={isLoading}
+                                        className={`p-3 rounded-xl transition-all ${isListening
+                                            ? 'bg-red-500 hover:bg-red-600 text-white animate-pulse shadow-lg shadow-red-500/30'
+                                            : 'bg-gray-100 hover:bg-gray-200 text-gray-600'
+                                            }`}
+                                        title={isListening ? "Parar gravação" : "Gravar mensagem de voz"}
+                                    >
+                                        {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+                                    </button>
+                                )}
+
+                                {/* Botão de Enviar */}
                                 <button
                                     type="submit"
                                     disabled={isLoading || !input.trim()}
-                                    className="absolute right-2 top-2 p-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                                    className="p-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors"
                                 >
-                                    <Send className="w-4 h-4" />
+                                    <Send className="w-5 h-5" />
                                 </button>
                             </div>
                         </form>

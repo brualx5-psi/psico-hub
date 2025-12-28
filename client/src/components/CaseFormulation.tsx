@@ -1,124 +1,254 @@
 import React, { useState, useEffect } from 'react';
 import { usePatients } from '../context/PatientContext';
-import { EellsFormulation } from '../types/eells';
+import { EellsMechanisms, EellsFormulationV2, CoreBelief, FormulationHistoryEntry } from '../types/eells';
 import { Save, Wand2, Loader2, FileText, BrainCircuit, ArrowRight } from 'lucide-react';
 import { generatePBTEdgesFromFormulation } from '../lib/gemini';
 import { useNavigation } from '../context/NavigationContext';
 import { aggregateAnamnesisData } from '../lib/anamnesis-utils';
+import { MechanismsCard } from './MechanismsCard';
+import { FormulationNarrativeCard } from './FormulationNarrativeCard';
+
+// Default empty mechanisms
+const defaultMechanisms: EellsMechanisms = {
+    precipitants: [],
+    origins: [],
+    resources: [],
+    obstacles: [],
+    observablePatterns: [],
+    maintainingProcesses: [],
+    coreBeliefs: []
+};
+
+// Default empty formulation
+const defaultFormulation: EellsFormulationV2 = {
+    explanatoryNarrative: '',
+    caseSummary: '',
+    testablePredictions: [],
+    treatmentImplications: '',
+    primaryDiagnosis: '',
+    differentialDiagnosis: [],
+    diagnosisNA: false,
+    diagnosisNAReason: ''
+};
 
 export const CaseFormulation: React.FC = () => {
     const { currentPatient, updatePatient } = usePatients();
-    const [formulation, setFormulation] = useState<EellsFormulation>({
-        problemList: { redFlags: '', chemicalDependence: false, suicidality: false, functioning: '' },
-        diagnosis: '',
-        explanatoryHypothesis: { precipitants: '', origins: '', resources: '', obstacles: '', coreHypothesis: '' },
-        treatmentPlan: { goals: '', interventions: '' },
-        narrative: ''
-    });
+    const [mechanisms, setMechanisms] = useState<EellsMechanisms>(defaultMechanisms);
+    const [formulation, setFormulation] = useState<EellsFormulationV2>(defaultFormulation);
     const [isGenerating, setIsGenerating] = useState(false);
     const [isGeneratingEdges, setIsGeneratingEdges] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const { navigateTo } = useNavigation();
 
+    // Load existing data
     useEffect(() => {
-        if (currentPatient?.clinicalRecords.caseFormulation.eells) {
-            setFormulation(currentPatient.clinicalRecords.caseFormulation.eells);
+        if (!currentPatient) return;
+
+        const eellsData = (currentPatient as any).eellsData;
+
+        // Load mechanisms (new format)
+        if (eellsData?.mechanisms) {
+            setMechanisms({
+                ...defaultMechanisms,
+                ...eellsData.mechanisms
+            });
+        }
+
+        // Load formulation V2 (new format)
+        if (eellsData?.formulationV2) {
+            setFormulation({
+                ...defaultFormulation,
+                ...eellsData.formulationV2
+            });
+        }
+        // Migrate from old format if exists
+        else if (currentPatient.clinicalRecords.caseFormulation?.eells) {
+            const oldEells = currentPatient.clinicalRecords.caseFormulation.eells;
+            setFormulation({
+                ...defaultFormulation,
+                explanatoryNarrative: oldEells.narrative || '',
+                primaryDiagnosis: oldEells.diagnosis || '',
+                redFlags: oldEells.problemList?.redFlags,
+                suicidality: oldEells.problemList?.suicidality,
+                chemicalDependence: oldEells.problemList?.chemicalDependence
+            });
+
+            // Migrate quadrants to mechanisms if they exist in old format
+            if (oldEells.explanatoryHypothesis) {
+                const migratedMechanisms: EellsMechanisms = {
+                    ...defaultMechanisms,
+                    precipitants: oldEells.explanatoryHypothesis.precipitants
+                        ? [{ id: crypto.randomUUID(), text: oldEells.explanatoryHypothesis.precipitants }]
+                        : [],
+                    origins: oldEells.explanatoryHypothesis.origins
+                        ? [{ id: crypto.randomUUID(), text: oldEells.explanatoryHypothesis.origins }]
+                        : [],
+                    resources: oldEells.explanatoryHypothesis.resources
+                        ? [{ id: crypto.randomUUID(), text: oldEells.explanatoryHypothesis.resources }]
+                        : [],
+                    obstacles: oldEells.explanatoryHypothesis.obstacles
+                        ? [{ id: crypto.randomUUID(), text: oldEells.explanatoryHypothesis.obstacles }]
+                        : []
+                };
+                setMechanisms(migratedMechanisms);
+            }
         }
     }, [currentPatient]);
 
-    const handleChange = (section: keyof EellsFormulation | 'diagnosis' | 'narrative', field: string, value: any) => {
-        setFormulation(prev => {
-            if (section === 'diagnosis') {
-                return { ...prev, diagnosis: value };
-            }
-            if (section === 'narrative') {
-                return { ...prev, narrative: value };
-            }
-            // Handle nested objects
-            if (section === 'problemList' || section === 'explanatoryHypothesis' || section === 'treatmentPlan') {
-                return {
-                    ...prev,
-                    [section]: {
-                        ...prev[section],
-                        [field]: value
-                    }
-                };
-            }
-            return prev;
-        });
-    };
-
-    const handleSave = () => {
+    // Save handler with version history
+    const handleSave = (changeReason?: string) => {
         if (!currentPatient) return;
         setIsSaving(true);
+
+        const now = new Date().toISOString();
+        const existingFormulation = (currentPatient as any).eellsData?.formulationV2;
+
+        // Create history entry only if MATERIAL change (anti-spam)
+        let newHistory: FormulationHistoryEntry[] = formulation.history || [];
+
+        const oldNarrative = existingFormulation?.explanatoryNarrative || '';
+        const newNarrative = formulation.explanatoryNarrative || '';
+        const oldDiagnosis = existingFormulation?.primaryDiagnosis || '';
+        const newDiagnosis = formulation.primaryDiagnosis || '';
+
+        // Calculate if change is material: >50 chars diff OR diagnosis changed
+        const narrativeDiff = Math.abs(newNarrative.length - oldNarrative.length);
+        const narrativeChanged = oldNarrative !== newNarrative && narrativeDiff > 50;
+
+        // Diagnosis changed: had and removed, didn't have and added, or value changed
+        const hadDiagnosis = oldDiagnosis.length > 0;
+        const hasDiagnosis = newDiagnosis.length > 0;
+        const diagnosisRemoved = hadDiagnosis && !hasDiagnosis;
+        const diagnosisAdded = !hadDiagnosis && hasDiagnosis;
+        const diagnosisModified = hadDiagnosis && hasDiagnosis && oldDiagnosis !== newDiagnosis;
+        const diagnosisChanged = diagnosisRemoved || diagnosisAdded || diagnosisModified;
+
+        const isMaterialChange = narrativeChanged || diagnosisChanged;
+
+        if (existingFormulation?.explanatoryNarrative && isMaterialChange) {
+            // Determine change type automatically
+            let autoChangeType = 'Atualização';
+            let structuredType: 'diagnosis_added' | 'diagnosis_removed' | 'diagnosis_modified' |
+                'hypothesis_major' | 'hypothesis_minor' | 'combined' | 'update' = 'update';
+
+            if (diagnosisRemoved) {
+                autoChangeType = 'Remoção de diagnóstico (em revisão)';
+                structuredType = 'diagnosis_removed';
+            } else if (diagnosisAdded) {
+                autoChangeType = 'Diagnóstico estabelecido';
+                structuredType = 'diagnosis_added';
+            } else if (diagnosisModified && narrativeChanged) {
+                autoChangeType = 'Revisão de hipótese e diagnóstico';
+                structuredType = 'combined';
+            } else if (diagnosisModified) {
+                autoChangeType = 'Revisão de diagnóstico';
+                structuredType = 'diagnosis_modified';
+            } else if (narrativeDiff > 200) {
+                autoChangeType = 'Mudança significativa de hipótese';
+                structuredType = 'hypothesis_major';
+            } else {
+                autoChangeType = 'Ajuste de narrativa';
+                structuredType = 'hypothesis_minor';
+            }
+
+            const historyEntry: FormulationHistoryEntry = {
+                id: crypto.randomUUID(),
+                date: now,
+                narrative: existingFormulation.explanatoryNarrative,
+                diagnosis: existingFormulation.primaryDiagnosis,
+                changeReason: changeReason || autoChangeType,
+                changeType: structuredType,
+                changedBy: 'terapeuta'
+            };
+            newHistory = [historyEntry, ...newHistory].slice(0, 20);
+        }
+
         updatePatient({
             ...currentPatient,
-            clinicalRecords: {
-                ...currentPatient.clinicalRecords,
-                caseFormulation: {
-                    ...currentPatient.clinicalRecords.caseFormulation,
-                    eells: formulation,
-                    updatedAt: new Date().toISOString()
+            eellsData: {
+                ...(currentPatient as any).eellsData,
+                mechanisms: {
+                    ...mechanisms,
+                    lastUpdated: now.split('T')[0]
+                },
+                formulationV2: {
+                    ...formulation,
+                    history: newHistory,
+                    lastUpdated: now.split('T')[0]
                 }
             }
-        });
+        } as any);
+
         setTimeout(() => setIsSaving(false), 1000);
     };
 
-    // Placeholder for AI generation logic
+    // AI auto-fill (adapted for new format)
     const handleAutoFill = async () => {
         if (!currentPatient) return;
         setIsGenerating(true);
 
         try {
-            // Get aggregated data from all anamneses (Structured + EBP)
             const anamnesisText = aggregateAnamnesisData(currentPatient);
             const assessments = currentPatient.clinicalRecords.assessments || [];
 
-            // Import dynamically to avoid circular deps if any, or just direct call
             const { generateInitialFormulation } = await import('../lib/gemini');
-
             const result = await generateInitialFormulation(anamnesisText, assessments);
 
-            // Update Formulation State (Eells) with ALL fields from AI
-            const newFormulation = {
-                ...formulation,
-                diagnosis: result.suggestedDiagnosis || formulation.diagnosis,
-                narrative: result.narrativeDraft || formulation.narrative,
-                problemList: {
-                    ...formulation.problemList,
-                    redFlags: result.problemList || formulation.problemList.redFlags,
-                    suicidality: result.suicidality === true,
-                    chemicalDependence: result.chemicalDependence === true
-                },
-                explanatoryHypothesis: {
-                    ...formulation.explanatoryHypothesis,
-                    precipitants: result.precipitants || formulation.explanatoryHypothesis.precipitants,
-                    origins: result.origins || formulation.explanatoryHypothesis.origins,
-                    resources: result.resources || formulation.explanatoryHypothesis.resources,
-                    obstacles: result.obstacles || formulation.explanatoryHypothesis.obstacles
-                },
-                treatmentPlan: {
-                    ...formulation.treatmentPlan,
-                    goals: result.goals || formulation.treatmentPlan.goals,
-                    interventions: result.guidelineRecommendations?.map((g: any) => `- ${g.title}: ${g.relevance} (${g.source})`).join('\n') || formulation.treatmentPlan.interventions
+            // Helper: convert array or string to MechanismItem[]
+            const toMechanismItems = (input: string[] | string | undefined): { id: string; text: string }[] => {
+                if (!input) return [];
+                if (Array.isArray(input)) {
+                    return input.map(text => ({ id: crypto.randomUUID(), text }));
                 }
+                // Fallback for string (old format)
+                return [{ id: crypto.randomUUID(), text: input }];
             };
 
+            // Update Mechanisms with arrays from AI
+            const newMechanisms: EellsMechanisms = {
+                ...mechanisms,
+                precipitants: result.precipitants?.length
+                    ? toMechanismItems(result.precipitants)
+                    : mechanisms.precipitants,
+                origins: result.origins?.length
+                    ? toMechanismItems(result.origins)
+                    : mechanisms.origins,
+                resources: result.resources?.length
+                    ? toMechanismItems(result.resources)
+                    : mechanisms.resources,
+                obstacles: result.obstacles?.length
+                    ? toMechanismItems(result.obstacles)
+                    : mechanisms.obstacles,
+                maintainingProcesses: result.maintainingProcesses?.length
+                    ? result.maintainingProcesses
+                    : mechanisms.maintainingProcesses,
+                observablePatterns: result.observablePatterns?.length
+                    ? result.observablePatterns
+                    : mechanisms.observablePatterns
+            };
+            setMechanisms(newMechanisms);
+
+            // Update Formulation V2
+            const newFormulation: EellsFormulationV2 = {
+                ...formulation,
+                explanatoryNarrative: result.narrativeDraft || formulation.explanatoryNarrative,
+                primaryDiagnosis: result.suggestedDiagnosis || formulation.primaryDiagnosis,
+                redFlags: result.problemList || formulation.redFlags,
+                suicidality: result.suicidality === true,
+                chemicalDependence: result.chemicalDependence === true
+            };
             setFormulation(newFormulation);
 
-            // AUTO-SAVE: Save immediately after AI generation to prevent loss
+            // Auto-save
+            const now = new Date().toISOString().split('T')[0];
             updatePatient({
                 ...currentPatient,
-                clinicalRecords: {
-                    ...currentPatient.clinicalRecords,
-                    caseFormulation: {
-                        ...currentPatient.clinicalRecords.caseFormulation,
-                        eells: newFormulation,
-                        updatedAt: new Date().toISOString()
-                    }
+                eellsData: {
+                    ...(currentPatient as any).eellsData,
+                    mechanisms: { ...newMechanisms, lastUpdated: now },
+                    formulationV2: { ...newFormulation, lastUpdated: now }
                 }
-            });
+            } as any);
 
         } catch (error) {
             console.error("Auto-fill error", error);
@@ -128,7 +258,7 @@ export const CaseFormulation: React.FC = () => {
         }
     };
 
-    // Gerar Conexões PBT a partir da Conceituação
+    // Generate PBT Edges
     const handleGeneratePBTEdges = async () => {
         if (!currentPatient) return;
 
@@ -145,12 +275,24 @@ export const CaseFormulation: React.FC = () => {
 
         setIsGeneratingEdges(true);
         try {
-            const result = await generatePBTEdgesFromFormulation(formulation, existingNodes, existingEdges);
+            // Convert new format to old format for compatibility with existing function
+            const legacyFormulation = {
+                diagnosis: formulation.primaryDiagnosis || '',
+                narrative: formulation.explanatoryNarrative || '',
+                problemList: { redFlags: formulation.redFlags || '', suicidality: false, chemicalDependence: false, functioning: '' },
+                explanatoryHypothesis: {
+                    precipitants: mechanisms.precipitants.map(p => p.text).join('; '),
+                    origins: mechanisms.origins.map(p => p.text).join('; '),
+                    resources: mechanisms.resources.map(p => p.text).join('; '),
+                    obstacles: mechanisms.obstacles.map(p => p.text).join('; '),
+                    coreHypothesis: formulation.explanatoryNarrative || ''
+                },
+                treatmentPlan: { goals: '', interventions: '' }
+            };
 
-            // Merge with existing edges
+            const result = await generatePBTEdgesFromFormulation(legacyFormulation, existingNodes, existingEdges);
+
             const mergedEdges = [...existingEdges, ...result.edges];
-
-            // Update patient
             const updatedPatient = JSON.parse(JSON.stringify(currentPatient));
             updatedPatient.clinicalRecords.sessions[0].pbtNetwork = {
                 nodes: existingNodes,
@@ -169,6 +311,7 @@ export const CaseFormulation: React.FC = () => {
 
     return (
         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
+            {/* Header */}
             <div className="flex items-center justify-between">
                 <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
                     <FileText className="w-6 h-6 text-purple-400" />
@@ -192,7 +335,7 @@ export const CaseFormulation: React.FC = () => {
                         {isGeneratingEdges ? 'Gerando...' : '🕸️ Gerar Conexões PBT'}
                     </button>
                     <button
-                        onClick={handleSave}
+                        onClick={() => handleSave()}
                         className="flex items-center gap-2 px-6 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg font-bold transition-colors text-sm"
                     >
                         {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
@@ -201,134 +344,17 @@ export const CaseFormulation: React.FC = () => {
                 </div>
             </div>
 
-            {/* Diagram Structure Implementation */}
-            <div className="flex flex-col gap-4">
+            {/* Mechanisms Card */}
+            <MechanismsCard
+                mechanisms={mechanisms}
+                onChange={setMechanisms}
+            />
 
-                {/* 1. Problem List & Diagnosis Row */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col gap-2">
-                        <h3 className="text-sm font-bold text-cyan-600 uppercase tracking-widest">Lista de Problemas</h3>
-                        <textarea
-                            value={formulation.problemList.redFlags}
-                            onChange={(e) => handleChange('problemList', 'redFlags', e.target.value)}
-                            className="flex-1 bg-gray-50 border border-gray-200 rounded p-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-cyan-500 resize-none"
-                            placeholder="Sintomas, Queixas, Red Flags..."
-                            rows={8}
-                        />
-                        <div className="flex flex-col gap-2 mt-2">
-                            <label className="flex items-center gap-2 text-xs text-gray-600">
-                                <input
-                                    type="checkbox"
-                                    checked={formulation.problemList.suicidality}
-                                    onChange={(e) => handleChange('problemList', 'suicidality', e.target.checked)}
-                                    className="rounded border-white/20 bg-slate-800"
-                                /> Risco de Suicídio
-                            </label>
-                            <label className="flex items-center gap-2 text-xs text-gray-600">
-                                <input
-                                    type="checkbox"
-                                    checked={formulation.problemList.chemicalDependence}
-                                    onChange={(e) => handleChange('problemList', 'chemicalDependence', e.target.checked)}
-                                    className="rounded border-white/20 bg-slate-800"
-                                /> Dependência Química
-                            </label>
-                        </div>
-                    </div>
-
-                    <div className="md:col-span-2 bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col gap-4">
-                        <div className="flex flex-col gap-2">
-                            <h3 className="text-sm font-bold text-cyan-400 uppercase tracking-widest">Diagnóstico</h3>
-                            <input
-                                type="text"
-                                value={formulation.diagnosis}
-                                onChange={(e) => handleChange('diagnosis', 'diagnosis', e.target.value)} // fix logic above for root keys
-                                className="bg-gray-50 border border-gray-200 rounded p-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                                placeholder="DSM-5 / CID-11"
-                            />
-                        </div>
-                        <div className="block h-px bg-white/5 w-full my-2"></div>
-                        <div className="grid grid-cols-2 gap-4 flex-1">
-                            <div className="flex flex-col gap-2">
-                                <h3 className="text-sm font-bold text-amber-400 uppercase tracking-widest">Precipitantes</h3>
-                                <textarea
-                                    value={formulation.explanatoryHypothesis.precipitants}
-                                    onChange={(e) => handleChange('explanatoryHypothesis', 'precipitants', e.target.value)}
-                                    className="flex-1 bg-slate-950/50 border border-white/5 rounded p-2 text-sm text-slate-300 focus:outline-none focus:border-amber-500/50 resize-none"
-                                    placeholder="Gatilhos..."
-                                />
-                            </div>
-                            <div className="flex flex-col gap-2">
-                                <h3 className="text-sm font-bold text-amber-400 uppercase tracking-widest">Origens</h3>
-                                <textarea
-                                    value={formulation.explanatoryHypothesis.origins}
-                                    onChange={(e) => handleChange('explanatoryHypothesis', 'origins', e.target.value)}
-                                    className="flex-1 bg-slate-950/50 border border-white/5 rounded p-2 text-sm text-slate-300 focus:outline-none focus:border-amber-500/50 resize-none"
-                                    placeholder="História de vida..."
-                                />
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                {/* 2. Resources & Obstacles */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="bg-slate-900/50 p-4 rounded-xl border border-white/10 flex flex-col gap-2">
-                        <h3 className="text-sm font-bold text-emerald-400 uppercase tracking-widest">Recursos / Forças</h3>
-                        <textarea
-                            value={formulation.explanatoryHypothesis.resources}
-                            onChange={(e) => handleChange('explanatoryHypothesis', 'resources', e.target.value)}
-                            className="bg-slate-950/50 border border-white/5 rounded p-2 text-sm text-slate-300 focus:outline-none focus:border-emerald-500/50 resize-none"
-                            rows={3}
-                        />
-                    </div>
-                    <div className="bg-slate-900/50 p-4 rounded-xl border border-white/10 flex flex-col gap-2">
-                        <h3 className="text-sm font-bold text-red-400 uppercase tracking-widest">Obstáculos</h3>
-                        <textarea
-                            value={formulation.explanatoryHypothesis.obstacles}
-                            onChange={(e) => handleChange('explanatoryHypothesis', 'obstacles', e.target.value)}
-                            className="bg-slate-950/50 border border-white/5 rounded p-2 text-sm text-slate-300 focus:outline-none focus:border-red-500/50 resize-none"
-                            rows={3}
-                        />
-                    </div>
-                </div>
-
-                {/* 3. Treatment Plan */}
-                <div className="bg-slate-900/50 p-4 rounded-xl border border-white/10 flex flex-col gap-2">
-                    <h3 className="text-sm font-bold text-pink-400 uppercase tracking-widest">Plano de Tratamento</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <textarea
-                            value={formulation.treatmentPlan.goals}
-                            onChange={(e) => handleChange('treatmentPlan', 'goals', e.target.value)}
-                            className="bg-slate-950/50 border border-white/5 rounded p-2 text-sm text-slate-300 focus:outline-none focus:border-pink-500/50 resize-none"
-                            placeholder="Objetivos (Curto e Longo prazo)..."
-                            rows={5}
-                        />
-                        <textarea
-                            value={formulation.treatmentPlan.interventions}
-                            onChange={(e) => handleChange('treatmentPlan', 'interventions', e.target.value)}
-                            className="bg-slate-950/50 border border-white/5 rounded p-2 text-sm text-slate-300 focus:outline-none focus:border-pink-500/50 resize-none"
-                            placeholder="Intervenções..."
-                            rows={5}
-                        />
-                    </div>
-                </div>
-
-                {/* 4. Narrative (Bottom Text) */}
-                <div className="bg-slate-900/50 p-6 rounded-xl border border-white/10 flex flex-col gap-4">
-                    <h3 className="text-sm font-bold text-white uppercase tracking-widest flex items-center gap-2">
-                        <FileText className="w-4 h-4 text-purple-400" />
-                        Narrativa Explicativa
-                    </h3>
-                    <p className="text-slate-500 text-xs">Abaixo, conecte os pontos acima em uma história clínica coesa (Eells). Explique como os precipitantes ativaram vulnerabilidades (Origens/Mecanismos) gerando os Problemas atuais.</p>
-                    <textarea
-                        value={formulation.narrative || ''}
-                        onChange={(e) => setFormulation(prev => ({ ...prev, narrative: e.target.value }))}
-                        className="w-full bg-slate-950 border border-white/10 rounded-lg p-4 text-sm text-slate-300 focus:outline-none focus:border-purple-500/50 font-serif leading-relaxed resize-y min-h-[200px]"
-                        placeholder="Escreva aqui a narrativa integrativa do caso..."
-                    />
-                </div>
-
-            </div>
+            {/* Formulation Narrative Card */}
+            <FormulationNarrativeCard
+                formulation={formulation}
+                onChange={setFormulation}
+            />
 
             {/* Guidance for Next Steps */}
             <div className="bg-gradient-to-br from-cyan-50 to-teal-50 border border-cyan-200 rounded-2xl p-6 animate-in slide-in-from-bottom-8 duration-700 shadow-lg">
@@ -360,7 +386,6 @@ export const CaseFormulation: React.FC = () => {
                     </div>
                 </div>
             </div>
-
         </div>
     );
 };

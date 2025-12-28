@@ -997,31 +997,50 @@ CAMPOS A PREENCHER:
 
 2. **problemList**: Lista os principais sintomas, queixas e red flags identificados na anamnese (texto corrido, separado por ponto e vírgula).
 
-3. **precipitants**: Fatores precipitantes/gatilhos que desencadeiam ou agravam os sintomas (eventos, situações, pensamentos).
+3. **precipitants**: ARRAY de 2-4 gatilhos/eventos precipitantes ESPECÍFICOS (não texto corrido).
 
-4. **origins**: História de vida e origens do problema. Inclua fatores predisponentes, eventos significativos da infância/adolescência, padrões familiares.
+4. **origins**: ARRAY de 2-4 fatores de origem/história de vida (não texto corrido).
 
-5. **resources**: Recursos e forças do paciente. Pontos positivos, habilidades, suporte social, motivação para mudança.
+5. **resources**: ARRAY de 2-4 recursos e forças do paciente (não texto corrido).
 
-6. **obstacles**: Obstáculos ao tratamento. Barreiras, resistências, fatores que podem dificultar o progresso.
+6. **obstacles**: ARRAY de 2-4 obstáculos ao tratamento (não texto corrido).
 
-7. **narrativeDraft**: Narrativa explicativa integradora no estilo Eells. Conecte precipitantes, origens, mecanismos e problemas atuais em uma história coerente.
+7. **maintainingProcesses**: ARRAY de 2-4 processos/mecanismos que MANTÊM o problema ativo. Use termos técnicos como:
+   - "Evitação experiencial"
+   - "Ruminação"
+   - "Pensamento catastrófico"
+   - "Reforço negativo"
+   - "Fusão cognitiva"
+   - "Esquemas de abandono"
+   - "Comportamento de segurança"
 
-8. **goals**: Objetivos terapêuticos de curto e longo prazo.
+8. **observablePatterns**: ARRAY de 2-4 padrões comportamentais OBSERVÁVEIS. Use termos como:
+   - "Isolamento social"
+   - "Procrastinação"
+   - "Explosões de raiva"
+   - "Comportamento de checagem"
+   - "Abuso de substâncias"
+   - "Autolesão"
 
-9. **guidelineRecommendations**: Intervenções baseadas em evidências (NICE, APA, etc).
+9. **narrativeDraft**: Narrativa explicativa integradora no estilo Eells (min. 150 caracteres). Conecte precipitantes, origens, mecanismos e problemas atuais.
+
+10. **goals**: Objetivos terapêuticos de curto e longo prazo.
+
+11. **guidelineRecommendations**: Intervenções baseadas em evidências (NICE, APA, etc).
 
 Responda APENAS em JSON:
 {
-  "suggestedDiagnosis": "Diagnóstico completo com códigos",
+  "suggestedDiagnosis": "Diagnóstico completo com códigos DSM-5/CID-11",
   "problemList": "Sintoma 1; Sintoma 2; Sintoma 3; Red flags se houver",
   "suicidality": false,
   "chemicalDependence": false,
-  "precipitants": "Gatilho 1, Gatilho 2, Situações específicas",
-  "origins": "História de vida, fatores predisponentes, eventos formativos",
-  "resources": "Força 1, Recurso 2, Suporte disponível",
-  "obstacles": "Barreira 1, Obstáculo 2, Resistências identificadas",
-  "narrativeDraft": "Narrativa explicativa completa conectando todos os pontos...",
+  "precipitants": ["Demissão recente", "Término de relacionamento", "Conflito familiar"],
+  "origins": ["Negligência na infância", "Bullying escolar", "Pais críticos"],
+  "resources": ["Rede de apoio", "Inteligência", "Motivação para mudança"],
+  "obstacles": ["Resistência à medicação", "Dificuldade financeira", "Má adesão"],
+  "maintainingProcesses": ["Evitação experiencial", "Ruminação", "Reforço negativo"],
+  "observablePatterns": ["Isolamento social", "Procrastinação", "Faltas no trabalho"],
+  "narrativeDraft": "O paciente apresenta sintomas que começaram após [precipitante], ativando vulnerabilidades formadas na [origens]. A [processo mantenedor] alivia temporariamente mas reforça o padrão de [padrão observável]...",
   "goals": "Objetivo 1; Objetivo 2; Objetivo de longo prazo",
   "guidelineRecommendations": [
     { "title": "Intervenção X", "relevance": "Alta", "source": "NICE/APA" }
