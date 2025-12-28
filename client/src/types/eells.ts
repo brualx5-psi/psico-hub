@@ -414,6 +414,9 @@ export interface EellsData {
 
     // 9. Monitoramento Proativo (Etapa 6 Eells)
     monitoring?: MonitoringData;
+
+    // 10. Alta e Prevenção de Recaída (Etapa 7 Eells)
+    discharge?: DischargeData;
 }
 
 // Histórico de revisões do Plano de Tratamento
@@ -552,3 +555,95 @@ export const FREQUENCY_DAYS: Record<AssessmentFrequency, number> = {
     'personalizado': 0     // Usa customDays
 };
 
+// ============================================
+// ETAPA 7: ALTA E PREVENÇÃO DE RECAÍDA
+// ============================================
+
+// Critério individual de alta
+export interface DischargeCriterion {
+    id: string;
+    description: string;           // Ex: "GAD-7 < 5 por 4 semanas"
+    category: 'sintomas' | 'funcionalidade' | 'mecanismos' | 'alianca' | 'autonomia';
+    met: boolean;                  // Atingido?
+    metDate?: string;              // Quando foi atingido
+    evidence?: string;             // Evidência/fonte
+    weight: number;                // 1-3 (importância)
+}
+
+// Status de prontidão para alta
+export type DischargeStatus =
+    | 'nao_indicada'              // < 50% critérios
+    | 'em_preparacao'             // 50-75% critérios
+    | 'indicada'                  // > 75% critérios
+    | 'alta_realizada';           // Processo concluído
+
+// Avaliação de prontidão para alta
+export interface DischargeReadiness {
+    criteria: DischargeCriterion[];
+    overallStatus: DischargeStatus;
+    percentMet: number;            // % de critérios atingidos (ponderado)
+    estimatedSessions?: number;    // Sessões estimadas restantes
+    lastEvaluated: string;         // Data da última avaliação
+    notes?: string;                // Observações do terapeuta
+}
+
+// Sinal de alerta para recaída
+export interface WarningSign {
+    id: string;
+    description: string;           // Ex: "Voltar a evitar situações sociais"
+    category: 'cognitivo' | 'comportamental' | 'emocional' | 'fisiologico' | 'social';
+    severity: 'precoce' | 'moderado' | 'critico';
+    personalizedCue?: string;      // Frase do próprio paciente
+}
+
+// Estratégia de enfrentamento
+export interface CopingStrategy {
+    id: string;
+    forWarningSign?: string;       // ID do sinal que essa estratégia endereça
+    description: string;           // Ex: "Usar respiração diafragmática"
+    category: 'cognitiva' | 'comportamental' | 'social' | 'automonitoramento';
+    practiced: boolean;            // Já praticou em sessão?
+    effectivenessRating?: number;  // 1-5 (auto-avaliada)
+}
+
+// Plano de Prevenção de Recaída
+export interface RelapsePrevention {
+    warningSigns: WarningSign[];
+    copingStrategies: CopingStrategy[];
+
+    // Rede de apoio
+    supportNetwork: {
+        name: string;
+        relationship: string;
+        contactInfo?: string;
+        role: string;              // Ex: "Conversar quando ansioso"
+    }[];
+
+    // Recursos externos
+    emergencyContacts: {
+        name: string;
+        phone: string;
+        when: string;              // Ex: "Se pensamentos de auto-lesão"
+    }[];
+
+    // Manutenção
+    maintenancePlan?: {
+        sessionFrequency: 'mensal' | 'bimestral' | 'trimestral' | 'quando_necessario';
+        boosterTopics: string[];   // Tópicos para reforço
+        selfMonitoringTools: string[]; // Ex: "App de humor", "Diário"
+    };
+
+    // Carta para si mesmo
+    letterToSelf?: string;         // Carta motivacional do paciente para si mesmo
+
+    createdAt: string;
+    lastUpdated: string;
+}
+
+// Extensão do EellsData para Etapa 7
+export interface DischargeData {
+    readiness: DischargeReadiness;
+    relapsePrevention: RelapsePrevention;
+    dischargeDate?: string;
+    dischargeSummary?: string;
+}
