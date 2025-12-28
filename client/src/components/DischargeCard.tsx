@@ -31,28 +31,30 @@ import {
     RelapsePrevention,
     WarningSign,
     CopingStrategy,
-    DischargeStatus
+    DischargeStatus,
+    CriterionStatus,
+    DischargeValidation
 } from '../types/eells';
 
 // Critérios sugeridos por categoria
-const SUGGESTED_CRITERIA: Omit<DischargeCriterion, 'id' | 'met' | 'metDate' | 'evidence'>[] = [
+const SUGGESTED_CRITERIA: Omit<DischargeCriterion, 'id' | 'metDate' | 'evidence' | 'naJustification'>[] = [
     // Sintomas
-    { description: 'Sintomas principais em faixa mínima por 4+ semanas', category: 'sintomas', weight: 3 },
-    { description: 'Sem episódios de crise nas últimas 6 semanas', category: 'sintomas', weight: 2 },
+    { description: 'Sintomas principais em faixa mínima por 4+ semanas', category: 'sintomas', weight: 3, status: 'pending' },
+    { description: 'Sem episódios de crise nas últimas 6 semanas', category: 'sintomas', weight: 2, status: 'pending' },
 
     // Funcionalidade
-    { description: 'Retorno às atividades cotidianas', category: 'funcionalidade', weight: 3 },
-    { description: 'Melhora nos relacionamentos interpessoais', category: 'funcionalidade', weight: 2 },
-    { description: 'Funcionamento ocupacional satisfatório', category: 'funcionalidade', weight: 2 },
+    { description: 'Retorno às atividades cotidianas', category: 'funcionalidade', weight: 3, status: 'pending' },
+    { description: 'Melhora nos relacionamentos interpessoais', category: 'funcionalidade', weight: 2, status: 'pending' },
+    { description: 'Funcionamento ocupacional satisfatório', category: 'funcionalidade', weight: 2, status: 'pending' },
 
     // Mecanismos
-    { description: 'Padrões disfuncionais identificados e modificados', category: 'mecanismos', weight: 3 },
-    { description: 'Crenças nucleares flexibilizadas', category: 'mecanismos', weight: 2 },
+    { description: 'Padrões disfuncionais identificados e modificados', category: 'mecanismos', weight: 3, status: 'pending' },
+    { description: 'Crenças nucleares flexibilizadas', category: 'mecanismos', weight: 2, status: 'pending' },
 
     // Aliança/Autonomia
-    { description: 'Paciente percebe progresso e confia nas próprias habilidades', category: 'autonomia', weight: 3 },
-    { description: 'Usa estratégias aprendidas de forma independente', category: 'autonomia', weight: 3 },
-    { description: 'Acordo mútuo sobre encerramento', category: 'alianca', weight: 2 },
+    { description: 'Paciente percebe progresso e confia nas próprias habilidades', category: 'autonomia', weight: 3, status: 'pending' },
+    { description: 'Usa estratégias aprendidas de forma independente', category: 'autonomia', weight: 3, status: 'pending' },
+    { description: 'Acordo mútuo sobre encerramento', category: 'alianca', weight: 2, status: 'pending' },
 ];
 
 // Cores por categoria
@@ -82,17 +84,73 @@ export const DischargeCard: React.FC = () => {
         return (currentPatient as any).eellsData?.discharge || null;
     }, [currentPatient]);
 
-    // Calcular status de prontidão
-    const calculateStatus = (criteria: DischargeCriterion[]): { status: DischargeStatus; percent: number } => {
+    // Calcular validação de travas
+    const calculateValidation = (data: DischargeData): DischargeValidation => {
+        const criteria = data.readiness.criteria;
+        const prevention = data.relapsePrevention;
+
+        // Calcular percentual (ignorar N/A no total)
+        const applicableCriteria = criteria.filter(c => c.status !== 'not_applicable');
+        const totalWeight = applicableCriteria.reduce((sum, c) => sum + c.weight, 0);
+        const metWeight = applicableCriteria.filter(c => c.status === 'met').reduce((sum, c) => sum + c.weight, 0);
+        const percent = totalWeight > 0 ? Math.round((metWeight / totalWeight) * 100) : 0;
+
+        // Verificar N/A justificados
+        const naWithoutJustification = criteria.filter(c => c.status === 'not_applicable' && (!c.naJustification || c.naJustification.trim().length < 5));
+
+        const missingItems: string[] = [];
+
+        const hasMinWarningSigns = prevention.warningSigns.length >= 1;
+        if (!hasMinWarningSigns) missingItems.push('Mínimo 1 sinal de alerta');
+
+        const hasMinCopingStrategies = prevention.copingStrategies.length >= 2;
+        if (!hasMinCopingStrategies) missingItems.push('Mínimo 2 estratégias de enfrentamento');
+
+        const hasCriteriaPercent = percent >= 75;
+        if (!hasCriteriaPercent) missingItems.push('75% dos critérios atingidos');
+
+        const allNAJustified = naWithoutJustification.length === 0;
+        if (!allNAJustified) missingItems.push('Justificativa para todos os N/A');
+
+        return {
+            hasMinWarningSigns,
+            hasMinCopingStrategies,
+            hasCriteriaPercent,
+            allNAJustified,
+            canMarkAsRealized: hasMinWarningSigns && hasMinCopingStrategies && hasCriteriaPercent && allNAJustified,
+            missingItems
+        };
+    };
+
+    // Calcular status de prontidão (com travas)
+    const calculateStatus = (data: DischargeData): { status: DischargeStatus; percent: number } => {
+        const criteria = data.readiness.criteria;
+        const prevention = data.relapsePrevention;
+
         if (criteria.length === 0) return { status: 'nao_indicada', percent: 0 };
 
-        const totalWeight = criteria.reduce((sum, c) => sum + c.weight, 0);
-        const metWeight = criteria.filter(c => c.met).reduce((sum, c) => sum + c.weight, 0);
-        const percent = Math.round((metWeight / totalWeight) * 100);
+        // Ignorar N/A no cálculo
+        const applicableCriteria = criteria.filter(c => c.status !== 'not_applicable');
+        const totalWeight = applicableCriteria.reduce((sum, c) => sum + c.weight, 0);
+        const metWeight = applicableCriteria.filter(c => c.status === 'met').reduce((sum, c) => sum + c.weight, 0);
+        const percent = totalWeight > 0 ? Math.round((metWeight / totalWeight) * 100) : 0;
+
+        // Se já foi marcada como realizada, manter
+        if (data.readiness.overallStatus === 'alta_realizada') {
+            return { status: 'alta_realizada', percent };
+        }
+
+        // Verificar travas mínimas para cada status
+        const hasWarningSigns = prevention.warningSigns.length >= 1;
+        const hasCopingStrategies = prevention.copingStrategies.length >= 1;
 
         let status: DischargeStatus = 'nao_indicada';
-        if (percent >= 75) status = 'indicada';
-        else if (percent >= 50) status = 'em_preparacao';
+
+        if (percent >= 75 && hasWarningSigns && hasCopingStrategies) {
+            status = 'indicada';
+        } else if (percent >= 50 && hasWarningSigns) {
+            status = 'em_preparacao';
+        }
 
         return { status, percent };
     };
@@ -129,23 +187,46 @@ export const DischargeCard: React.FC = () => {
         } as any);
     };
 
-    const toggleCriterion = (criterionId: string) => {
+    const toggleCriterion = (criterionId: string, newStatus: CriterionStatus) => {
         const data = dischargeData || initializeDischargeData();
         const criteria = data.readiness.criteria.map(c =>
             c.id === criterionId
-                ? { ...c, met: !c.met, metDate: !c.met ? new Date().toISOString() : undefined }
+                ? {
+                    ...c,
+                    status: newStatus,
+                    metDate: newStatus === 'met' ? new Date().toISOString() : undefined,
+                    naJustification: newStatus === 'not_applicable' ? c.naJustification : undefined
+                }
                 : c
         );
 
-        const { status, percent } = calculateStatus(criteria);
+        const updatedData = {
+            ...data,
+            readiness: {
+                ...data.readiness,
+                criteria,
+                lastEvaluated: new Date().toISOString()
+            }
+        };
+
+        const { status, percent } = calculateStatus(updatedData);
+        updatedData.readiness.overallStatus = status;
+        updatedData.readiness.percentMet = percent;
+
+        saveDischargeData(updatedData);
+    };
+
+    const updateNAJustification = (criterionId: string, justification: string) => {
+        const data = dischargeData || initializeDischargeData();
+        const criteria = data.readiness.criteria.map(c =>
+            c.id === criterionId ? { ...c, naJustification: justification } : c
+        );
 
         saveDischargeData({
             ...data,
             readiness: {
                 ...data.readiness,
                 criteria,
-                overallStatus: status,
-                percentMet: percent,
                 lastEvaluated: new Date().toISOString()
             }
         });
@@ -160,22 +241,24 @@ export const DischargeCard: React.FC = () => {
             description: newCriterion.description,
             category: newCriterion.category,
             weight: newCriterion.weight,
-            met: false
+            status: 'pending'
         };
 
         const criteria = [...data.readiness.criteria, criterion];
-        const { status, percent } = calculateStatus(criteria);
-
-        saveDischargeData({
+        const updatedData = {
             ...data,
             readiness: {
                 ...data.readiness,
                 criteria,
-                overallStatus: status,
-                percentMet: percent,
                 lastEvaluated: new Date().toISOString()
             }
-        });
+        };
+
+        const { status, percent } = calculateStatus(updatedData);
+        updatedData.readiness.overallStatus = status;
+        updatedData.readiness.percentMet = percent;
+
+        saveDischargeData(updatedData);
 
         setNewCriterion({ description: '', category: 'sintomas', weight: 2 });
         setShowAddCriterion(false);
@@ -189,23 +272,24 @@ export const DischargeCard: React.FC = () => {
             .filter(c => !existingDescriptions.has(c.description))
             .map(c => ({
                 id: crypto.randomUUID(),
-                ...c,
-                met: false
+                ...c
             }));
 
         const criteria = [...data.readiness.criteria, ...newCriteria];
-        const { status, percent } = calculateStatus(criteria);
-
-        saveDischargeData({
+        const updatedData = {
             ...data,
             readiness: {
                 ...data.readiness,
                 criteria,
-                overallStatus: status,
-                percentMet: percent,
                 lastEvaluated: new Date().toISOString()
             }
-        });
+        };
+
+        const { status, percent } = calculateStatus(updatedData);
+        updatedData.readiness.overallStatus = status;
+        updatedData.readiness.percentMet = percent;
+
+        saveDischargeData(updatedData);
     };
 
     const addWarningSign = () => {
@@ -305,8 +389,8 @@ export const DischargeCard: React.FC = () => {
                 <button
                     onClick={() => setActiveTab('readiness')}
                     className={`flex-1 py-3 text-sm font-medium transition-colors ${activeTab === 'readiness'
-                            ? 'text-emerald-600 border-b-2 border-emerald-600'
-                            : 'text-gray-500 hover:text-gray-700'
+                        ? 'text-emerald-600 border-b-2 border-emerald-600'
+                        : 'text-gray-500 hover:text-gray-700'
                         }`}
                 >
                     <Target className="w-4 h-4 inline mr-1" />
@@ -315,8 +399,8 @@ export const DischargeCard: React.FC = () => {
                 <button
                     onClick={() => setActiveTab('prevention')}
                     className={`flex-1 py-3 text-sm font-medium transition-colors ${activeTab === 'prevention'
-                            ? 'text-emerald-600 border-b-2 border-emerald-600'
-                            : 'text-gray-500 hover:text-gray-700'
+                        ? 'text-emerald-600 border-b-2 border-emerald-600'
+                        : 'text-gray-500 hover:text-gray-700'
                         }`}
                 >
                     <Shield className="w-4 h-4 inline mr-1" />
@@ -344,39 +428,76 @@ export const DischargeCard: React.FC = () => {
                             <div className="space-y-2">
                                 {data.readiness.criteria.map(criterion => {
                                     const colors = CATEGORY_COLORS[criterion.category];
+                                    const bgColor = criterion.status === 'met' ? 'bg-green-50 border-green-200'
+                                        : criterion.status === 'not_applicable' ? 'bg-gray-100 border-gray-200'
+                                            : 'bg-gray-50 border-gray-100';
                                     return (
                                         <div
                                             key={criterion.id}
-                                            className={`p-3 rounded-lg border ${criterion.met ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-100'}`}
+                                            className={`p-3 rounded-lg border ${bgColor}`}
                                         >
                                             <div className="flex items-start gap-3">
-                                                <button
-                                                    onClick={() => toggleCriterion(criterion.id)}
-                                                    className="mt-0.5"
-                                                >
-                                                    {criterion.met ? (
-                                                        <CheckCircle2 className="w-5 h-5 text-green-600" />
-                                                    ) : (
-                                                        <Circle className="w-5 h-5 text-gray-300" />
-                                                    )}
-                                                </button>
+                                                {/* Status Buttons */}
+                                                <div className="flex flex-col gap-1 mt-0.5">
+                                                    <button
+                                                        onClick={() => toggleCriterion(criterion.id, criterion.status === 'met' ? 'pending' : 'met')}
+                                                        title={criterion.status === 'met' ? 'Remover atingido' : 'Marcar como atingido'}
+                                                    >
+                                                        {criterion.status === 'met' ? (
+                                                            <CheckCircle2 className="w-5 h-5 text-green-600" />
+                                                        ) : (
+                                                            <Circle className="w-5 h-5 text-gray-300 hover:text-green-400" />
+                                                        )}
+                                                    </button>
+                                                    <button
+                                                        onClick={() => toggleCriterion(criterion.id, criterion.status === 'not_applicable' ? 'pending' : 'not_applicable')}
+                                                        className={`text-[10px] px-1 py-0.5 rounded ${criterion.status === 'not_applicable'
+                                                                ? 'bg-gray-600 text-white'
+                                                                : 'bg-gray-200 text-gray-500 hover:bg-gray-300'
+                                                            }`}
+                                                        title="Marcar como Não Aplicável"
+                                                    >
+                                                        N/A
+                                                    </button>
+                                                </div>
                                                 <div className="flex-1">
-                                                    <p className={`font-medium ${criterion.met ? 'text-green-800' : 'text-gray-700'}`}>
+                                                    <p className={`font-medium ${criterion.status === 'met' ? 'text-green-800'
+                                                            : criterion.status === 'not_applicable' ? 'text-gray-500 line-through'
+                                                                : 'text-gray-700'
+                                                        }`}>
                                                         {criterion.description}
                                                     </p>
-                                                    <div className="flex items-center gap-2 mt-1">
+                                                    <div className="flex items-center gap-2 mt-1 flex-wrap">
                                                         <span className={`px-2 py-0.5 rounded text-xs ${colors.bg} ${colors.text}`}>
                                                             {criterion.category}
                                                         </span>
                                                         <span className="text-xs text-gray-400">
                                                             Peso: {criterion.weight}
                                                         </span>
-                                                        {criterion.metDate && (
+                                                        {criterion.metDate && criterion.status === 'met' && (
                                                             <span className="text-xs text-green-600">
                                                                 ✓ {new Date(criterion.metDate).toLocaleDateString('pt-BR')}
                                                             </span>
                                                         )}
                                                     </div>
+                                                    {/* Campo justificativa N/A */}
+                                                    {criterion.status === 'not_applicable' && (
+                                                        <div className="mt-2">
+                                                            <input
+                                                                type="text"
+                                                                value={criterion.naJustification || ''}
+                                                                onChange={(e) => updateNAJustification(criterion.id, e.target.value)}
+                                                                placeholder="Justificativa para N/A (obrigatória)"
+                                                                className={`w-full text-xs px-2 py-1 border rounded ${!criterion.naJustification || criterion.naJustification.trim().length < 5
+                                                                        ? 'border-red-300 bg-red-50'
+                                                                        : 'border-gray-200'
+                                                                    }`}
+                                                            />
+                                                            {(!criterion.naJustification || criterion.naJustification.trim().length < 5) && (
+                                                                <p className="text-xs text-red-500 mt-0.5">Mínimo 5 caracteres</p>
+                                                            )}
+                                                        </div>
+                                                    )}
                                                 </div>
                                             </div>
                                         </div>
@@ -421,7 +542,7 @@ export const DischargeCard: React.FC = () => {
                                         <div key={sign.id} className="p-2 bg-amber-50 rounded-lg border border-amber-100 text-sm">
                                             <p className="text-amber-800">{sign.description}</p>
                                             <span className={`text-xs ${sign.severity === 'critico' ? 'text-red-600' :
-                                                    sign.severity === 'moderado' ? 'text-amber-600' : 'text-green-600'
+                                                sign.severity === 'moderado' ? 'text-amber-600' : 'text-green-600'
                                                 }`}>
                                                 {sign.severity} • {sign.category}
                                             </span>

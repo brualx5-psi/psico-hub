@@ -559,23 +559,42 @@ export const FREQUENCY_DAYS: Record<AssessmentFrequency, number> = {
 // ETAPA 7: ALTA E PREVENÇÃO DE RECAÍDA
 // ============================================
 
+// Status de um critério individual
+export type CriterionStatus = 'pending' | 'met' | 'not_applicable';
+
 // Critério individual de alta
 export interface DischargeCriterion {
     id: string;
     description: string;           // Ex: "GAD-7 < 5 por 4 semanas"
     category: 'sintomas' | 'funcionalidade' | 'mecanismos' | 'alianca' | 'autonomia';
-    met: boolean;                  // Atingido?
+    status: CriterionStatus;       // pending, met, not_applicable
     metDate?: string;              // Quando foi atingido
     evidence?: string;             // Evidência/fonte
+    naJustification?: string;      // Justificativa se N/A (obrigatória)
     weight: number;                // 1-3 (importância)
 }
 
 // Status de prontidão para alta
+// REGRAS:
+// - nao_indicada: < 50% critérios OU falta WarningSign OU falta CopingStrategy
+// - em_preparacao: 50-75% critérios E >= 1 WarningSign E >= 1 CopingStrategy
+// - indicada: > 75% critérios E >= 1 WarningSign E >= 2 CopingStrategies
+// - alta_realizada: marcação manual APÓS validação de travas
 export type DischargeStatus =
-    | 'nao_indicada'              // < 50% critérios
-    | 'em_preparacao'             // 50-75% critérios
-    | 'indicada'                  // > 75% critérios
-    | 'alta_realizada';           // Processo concluído
+    | 'nao_indicada'              // < 50% critérios OU falta preparação
+    | 'em_preparacao'             // 50-75% critérios + mínimos de prevenção
+    | 'indicada'                  // > 75% critérios + prevenção completa
+    | 'alta_realizada';           // Processo concluído (com travas)
+
+// Travas mínimas para "Alta realizada"
+export interface DischargeValidation {
+    hasMinWarningSigns: boolean;   // >= 1
+    hasMinCopingStrategies: boolean; // >= 2
+    hasCriteriaPercent: boolean;   // >= 75%
+    allNAJustified: boolean;       // Todos N/A têm justificativa
+    canMarkAsRealized: boolean;    // Todas as travas OK
+    missingItems: string[];        // Lista do que falta
+}
 
 // Avaliação de prontidão para alta
 export interface DischargeReadiness {
