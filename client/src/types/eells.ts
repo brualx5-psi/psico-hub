@@ -659,10 +659,57 @@ export interface RelapsePrevention {
     lastUpdated: string;
 }
 
+// Histórico de alterações da Etapa 7
+export interface DischargeHistoryEntry {
+    id: string;
+    date: string;
+    changeType: 'criteria_update' | 'prevention_update' | 'status_change' | 'maintenance_update' | 'discharge_complete';
+    description: string;           // Ex: "Critério 'GAD-7 < 5' marcado como atingido"
+    snapshot?: {
+        percentMet: number;
+        criteriaMetCount: number;
+        criteriaTotalCount: number;
+        warningSignsCount: number;
+        copingStrategiesCount: number;
+        status: DischargeStatus;
+    };
+}
+
+// Plano de Manutenção Expandido
+export interface MaintenancePlan {
+    frequency: 'mensal' | 'bimestral' | 'trimestral' | 'semestral' | 'quando_necessario';
+    durationMonths?: number;       // Ex: 6 (follow-up por 6 meses)
+
+    // O que observar
+    keyInstruments: string[];      // Ex: ["GAD-7", "PHQ-9"]
+    keyWarningSigns: string[];     // IDs dos sinais críticos
+
+    // Tópicos de reforço (booster)
+    boosterTopics: string[];       // Ex: ["Exposição", "Reestruturação cognitiva"]
+
+    // Automonitoramento
+    selfMonitoringTools: string[]; // Ex: ["App de humor", "Diário"]
+
+    // Próximo follow-up agendado
+    nextFollowUpDate?: string;
+
+    notes?: string;
+}
+
 // Extensão do EellsData para Etapa 7
 export interface DischargeData {
     readiness: DischargeReadiness;
     relapsePrevention: RelapsePrevention;
+    maintenancePlan?: MaintenancePlan;
+
+    // Histórico de alterações
+    history: DischargeHistoryEntry[];
+
+    // Dados de alta realizada
     dischargeDate?: string;
     dischargeSummary?: string;
+
+    // Metadados
+    createdAt: string;
+    lastUpdated: string;
 }

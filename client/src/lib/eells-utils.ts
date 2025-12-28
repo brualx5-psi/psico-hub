@@ -160,21 +160,56 @@ export function calculateEellsProgress(patient: Patient): EellsProgress {
     if (hasReassessments) monitoringScore += 50;
     progress.monitoring = monitoringScore;
 
-    // 7. DISCHARGE (0-100%)
+    // 7. DISCHARGE (0-100%) - Nova lógica com DischargeData
     let dischargeScore = 0;
-    const goalsAchieved = goals.filter((g: any) => g.currentProgress >= 80);
-    if (goals.length > 0 && goalsAchieved.length === goals.length) {
-        dischargeScore += 40;
-    }
+    const dischargeData = eellsData?.discharge;
 
-    const dischargeCriteria = patient.clinicalRecords.dischargeCriteria || [];
-    const criteriaAchieved = dischargeCriteria.filter(c => c.status === 'achieved');
-    if (dischargeCriteria.length > 0 && criteriaAchieved.length === dischargeCriteria.length) {
-        dischargeScore += 40;
-    }
+    if (dischargeData) {
+        const criteria = dischargeData.readiness?.criteria || [];
+        const prevention = dischargeData.relapsePrevention || {};
+        const maintenance = dischargeData.maintenancePlan;
 
-    // Plano de prevenção de recaída (hipotético por enquanto)
-    if (dischargeScore >= 80) dischargeScore += 20;
+        // 30% - Critérios definidos e >= 50% atingidos
+        if (criteria.length > 0) {
+            const applicableCriteria = criteria.filter((c: any) => c.status !== 'not_applicable');
+            const metCriteria = applicableCriteria.filter((c: any) => c.status === 'met');
+            const percentMet = applicableCriteria.length > 0
+                ? Math.round((metCriteria.length / applicableCriteria.length) * 100)
+                : 0;
+
+            if (percentMet >= 75) {
+                dischargeScore += 30;
+            } else if (percentMet >= 50) {
+                dischargeScore += 20;
+            } else if (criteria.length > 0) {
+                dischargeScore += 10;
+            }
+        }
+
+        // 25% - Sinais de alerta definidos (mínimo 1)
+        const warningSigns = prevention.warningSigns || [];
+        if (warningSigns.length >= 1) {
+            dischargeScore += 25;
+        }
+
+        // 25% - Estratégias de enfrentamento definidas (mínimo 2)
+        const copingStrategies = prevention.copingStrategies || [];
+        if (copingStrategies.length >= 2) {
+            dischargeScore += 25;
+        } else if (copingStrategies.length >= 1) {
+            dischargeScore += 15;
+        }
+
+        // 20% - Plano de manutenção definido
+        if (maintenance?.frequency && maintenance?.keyInstruments?.length > 0) {
+            dischargeScore += 20;
+        }
+
+        // Se alta foi realizada, garantir 100%
+        if (dischargeData.readiness?.overallStatus === 'alta_realizada') {
+            dischargeScore = 100;
+        }
+    }
 
     progress.discharge = dischargeScore;
 
@@ -317,7 +352,39 @@ export function getNextRecommendedAction(patient: Patient): string {
     }
 
     if (progress.discharge < 100) {
-        return 'Preparar critérios de alta e plano de prevenção';
+        const dischargeData = (patient as any).eellsData?.discharge;
+
+        if (!dischargeData?.readiness?.criteria?.length) {
+            return 'Definir critérios de alta (Etapa 7)';
+        }
+
+        const criteria = dischargeData.readiness.criteria || [];
+        const applicableCriteria = criteria.filter((c: any) => c.status !== 'not_applicable');
+        const metCriteria = applicableCriteria.filter((c: any) => c.status === 'met');
+        const percentMet = applicableCriteria.length > 0
+            ? Math.round((metCriteria.length / applicableCriteria.length) * 100)
+            : 0;
+
+        if (percentMet < 75) {
+            return `Atingir critérios de alta (${percentMet}% atual, meta: 75%)`;
+        }
+
+        const warningSigns = dischargeData.relapsePrevention?.warningSigns || [];
+        if (warningSigns.length < 1) {
+            return 'Definir sinais de alerta para recaída (mínimo 1)';
+        }
+
+        const copingStrategies = dischargeData.relapsePrevention?.copingStrategies || [];
+        if (copingStrategies.length < 2) {
+            return `Definir estratégias de enfrentamento (${copingStrategies.length}/2 mínimo)`;
+        }
+
+        const maintenance = dischargeData.maintenancePlan;
+        if (!maintenance?.frequency || !maintenance?.keyInstruments?.length) {
+            return 'Definir plano de manutenção (frequência + instrumentos-chave)';
+        }
+
+        return 'Revisar e finalizar processo de alta';
     }
 
     return 'Processo completo! Considerar alta terapêutica';

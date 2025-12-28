@@ -170,7 +170,10 @@ export const DischargeCard: React.FC = () => {
             emergencyContacts: [],
             createdAt: new Date().toISOString(),
             lastUpdated: new Date().toISOString(),
-        }
+        },
+        history: [],
+        createdAt: new Date().toISOString(),
+        lastUpdated: new Date().toISOString(),
     });
 
     // Handlers
@@ -452,8 +455,8 @@ export const DischargeCard: React.FC = () => {
                                                     <button
                                                         onClick={() => toggleCriterion(criterion.id, criterion.status === 'not_applicable' ? 'pending' : 'not_applicable')}
                                                         className={`text-[10px] px-1 py-0.5 rounded ${criterion.status === 'not_applicable'
-                                                                ? 'bg-gray-600 text-white'
-                                                                : 'bg-gray-200 text-gray-500 hover:bg-gray-300'
+                                                            ? 'bg-gray-600 text-white'
+                                                            : 'bg-gray-200 text-gray-500 hover:bg-gray-300'
                                                             }`}
                                                         title="Marcar como Não Aplicável"
                                                     >
@@ -462,8 +465,8 @@ export const DischargeCard: React.FC = () => {
                                                 </div>
                                                 <div className="flex-1">
                                                     <p className={`font-medium ${criterion.status === 'met' ? 'text-green-800'
-                                                            : criterion.status === 'not_applicable' ? 'text-gray-500 line-through'
-                                                                : 'text-gray-700'
+                                                        : criterion.status === 'not_applicable' ? 'text-gray-500 line-through'
+                                                            : 'text-gray-700'
                                                         }`}>
                                                         {criterion.description}
                                                     </p>
@@ -489,8 +492,8 @@ export const DischargeCard: React.FC = () => {
                                                                 onChange={(e) => updateNAJustification(criterion.id, e.target.value)}
                                                                 placeholder="Justificativa para N/A (obrigatória)"
                                                                 className={`w-full text-xs px-2 py-1 border rounded ${!criterion.naJustification || criterion.naJustification.trim().length < 5
-                                                                        ? 'border-red-300 bg-red-50'
-                                                                        : 'border-gray-200'
+                                                                    ? 'border-red-300 bg-red-50'
+                                                                    : 'border-gray-200'
                                                                     }`}
                                                             />
                                                             {(!criterion.naJustification || criterion.naJustification.trim().length < 5) && (
