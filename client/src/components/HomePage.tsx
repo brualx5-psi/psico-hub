@@ -3,13 +3,15 @@ import { PatientList } from './PatientList';
 import { ClinicDashboard } from './ClinicDashboard';
 import { WeeklyCalendar } from './WeeklyCalendar';
 import { usePatients } from '../context/PatientContext';
-import { Building2, ArrowLeft, Archive, User, ChevronDown, ChevronRight, Calendar } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import { Building2, ArrowLeft, Archive, User, ChevronDown, ChevronRight, Calendar, LogOut } from 'lucide-react';
 
 export const HomePage: React.FC = () => {
     const [showDashboard, setShowDashboard] = useState(false);
     const [showCalendar, setShowCalendar] = useState(false);
     const [showInactive, setShowInactive] = useState(false);
     const { patients, selectPatient } = usePatients();
+    const { user, signOut } = useAuth();
 
     const inactivePatients = patients.filter(p => p.status === 'inativo');
 
@@ -63,9 +65,45 @@ export const HomePage: React.FC = () => {
     }
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100 p-6">
+        <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100">
+            {/* Top Header with User Info */}
+            <div className="bg-white border-b border-gray-200 px-6 py-4">
+                <div className="max-w-7xl mx-auto flex items-center justify-between">
+                    {/* Logo/Brand */}
+                    <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-gradient-to-br from-indigo-600 to-purple-600 rounded-xl flex items-center justify-center shadow-lg">
+                            <span className="text-xl font-bold text-white">P</span>
+                        </div>
+                        <div>
+                            <h1 className="text-xl font-bold text-gray-900">PsicoHub</h1>
+                            <p className="text-xs text-gray-500">Sistema de Gestão Clínica</p>
+                        </div>
+                    </div>
+
+                    {/* User Menu */}
+                    {user && (
+                        <div className="flex items-center gap-4">
+                            <div className="text-right">
+                                <p className="text-sm font-medium text-gray-700">
+                                    {user.user_metadata?.full_name || user.email?.split('@')[0]}
+                                </p>
+                                <p className="text-xs text-gray-500">{user.email}</p>
+                            </div>
+                            <button
+                                onClick={() => signOut()}
+                                className="flex items-center gap-2 px-3 py-2 bg-gray-100 hover:bg-red-50 border border-gray-200 hover:border-red-200 text-gray-600 hover:text-red-600 rounded-lg text-sm font-medium transition-all"
+                                title="Sair do Sistema"
+                            >
+                                <LogOut className="w-4 h-4" />
+                                <span className="hidden sm:inline">Sair</span>
+                            </button>
+                        </div>
+                    )}
+                </div>
+            </div>
+
             {/* Main Content */}
-            <div className="max-w-7xl mx-auto">
+            <div className="max-w-7xl mx-auto p-6">
                 {/* Action Buttons */}
                 <div className="mb-6 flex gap-3">
                     <button

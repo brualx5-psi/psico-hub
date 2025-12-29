@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { usePatients } from '../context/PatientContext';
+import { useAuth } from '../context/AuthContext';
 import { InactivatePatientDialog } from './InactivatePatientDialog';
 import { EditScheduleDialog } from './EditScheduleDialog';
 import { EditBillingDialog } from './EditBillingDialog';
@@ -50,6 +51,7 @@ interface MenuCategory {
 
 export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, isCollapsed, onToggle }) => {
     const { currentPatient, clearCurrentPatient, updatePatient } = usePatients();
+    const { user, signOut } = useAuth();
     const [expandedCategories, setExpandedCategories] = useState<string[]>(['formulation', 'sessions', 'evolution']);
     const [showInactivateDialog, setShowInactivateDialog] = useState(false);
     const [showScheduleDialog, setShowScheduleDialog] = useState(false);
@@ -361,11 +363,35 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, isColl
                 })}
             </nav>
 
-            {/* Footer */}
+            {/* Footer with User Info and Logout */}
             <div className={`p-4 border-t border-gray-800 bg-gray-900/50 ${isCollapsed ? 'hidden' : ''}`}>
-                <div className="text-center text-xs text-gray-500">
-                    <p className="font-semibold text-gray-400">Supervisor PBE IA</p>
-                    <p className="mt-1">v2.0 • Modelo Eells</p>
+                {/* User Info */}
+                {user && (
+                    <div className="flex items-center gap-3 mb-3 pb-3 border-b border-gray-700">
+                        <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+                            {user.email?.charAt(0).toUpperCase() || 'U'}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                            <p className="text-sm text-gray-300 font-medium truncate">
+                                {user.user_metadata?.full_name || user.email?.split('@')[0]}
+                            </p>
+                            <p className="text-xs text-gray-500 truncate">{user.email}</p>
+                        </div>
+                    </div>
+                )}
+
+                {/* Logout Button */}
+                <button
+                    onClick={() => signOut()}
+                    className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-gray-800 hover:bg-red-600/20 border border-gray-700 hover:border-red-500/30 text-gray-400 hover:text-red-400 rounded-lg text-sm font-medium transition-all"
+                >
+                    <LogOut className="w-4 h-4" />
+                    Sair do Sistema
+                </button>
+
+                {/* Version Info */}
+                <div className="text-center text-xs text-gray-600 mt-3">
+                    <p>PsicoHub v2.0</p>
                 </div>
             </div>
 
