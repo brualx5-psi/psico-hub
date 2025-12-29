@@ -102,10 +102,10 @@ export const TreatmentPlanTab: React.FC = () => {
         try {
             // Coletar dados ricos do paciente
             const eellsData = (currentPatient as any).eellsData || {};
-            const clinicalRecords = currentPatient.clinicalRecords || {};
+            const clinicalRecords = currentPatient.clinicalRecords;
 
             // Extrair anamnese resumida
-            const anamneseContent = clinicalRecords.anamnesis?.content || '';
+            const anamneseContent = clinicalRecords?.anamnesis?.content || '';
             const anamneseSummary = anamneseContent.length > 500
                 ? anamneseContent.substring(0, 500) + '...'
                 : anamneseContent;
