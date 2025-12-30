@@ -160,15 +160,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, isColl
             </button>
 
             {/* PsicoHub Brand Header */}
-            <div className={`p-4 border-b border-gray-800/50 ${isCollapsed ? 'px-2' : ''}`}>
-                <div className={`flex items-center gap-2 ${isCollapsed ? 'justify-center' : ''}`}>
-                    <div className="w-8 h-8 flex-shrink-0">
+            <div className={`p-5 border-b border-gray-800/50 ${isCollapsed ? 'px-2' : ''}`}>
+                <div className={`flex items-center gap-3 ${isCollapsed ? 'justify-center' : ''}`}>
+                    <div className="w-12 h-12 flex-shrink-0">
                         <img src="https://i.ibb.co/DHmcwh8r/psicohublogo.png" alt="PsicoHub" className="w-full h-full object-contain" />
                     </div>
                     {!isCollapsed && (
                         <div>
-                            <h1 className="text-white font-bold text-sm">PsicoHub</h1>
-                            <p className="text-gray-500 text-[10px] leading-tight">Da formulação ao resultado</p>
+                            <h1 className="text-white font-bold text-lg">PsicoHub</h1>
+                            <p className="text-gray-400 text-xs leading-tight">Da formulação ao resultado</p>
                         </div>
                     )}
                 </div>

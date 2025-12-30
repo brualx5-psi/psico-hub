@@ -31,11 +31,11 @@ export const LoginPage: React.FC = () => {
             <div className="bg-white/10 backdrop-blur-lg rounded-3xl p-10 shadow-2xl border border-white/20 max-w-md w-full mx-4">
                 {/* Logo */}
                 <div className="text-center mb-8">
-                    <div className="w-24 h-24 mx-auto mb-4">
+                    <div className="w-32 h-32 mx-auto mb-6">
                         <img src="https://i.ibb.co/DHmcwh8r/psicohublogo.png" alt="PsicoHub" className="w-full h-full object-contain" />
                     </div>
-                    <h1 className="text-3xl font-bold text-white mb-2">PsicoHub</h1>
-                    <p className="text-gray-300 text-sm">Da formulação ao resultado, com evidência</p>
+                    <h1 className="text-4xl font-bold text-white mb-3">PsicoHub</h1>
+                    <p className="text-gray-300 text-base">Da formulação ao resultado, com evidência</p>
                 </div>
 
                 {/* Login Button */}
