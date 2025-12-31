@@ -1114,7 +1114,7 @@ export function PBTGraph({ nodes: initialDataNodes, edges: initialDataEdges, onG
   }
 
   return (
-    <div style={{ width: '100%', height: 'calc(100vh - 120px)', backgroundColor: currentTheme.background }} className="overflow-hidden relative group transition-colors duration-500 rounded-lg">
+    <div style={{ width: '100%', height: 'calc(100vh - 120px)', backgroundColor: currentTheme.background }} className="pbt-graph-container overflow-hidden relative group transition-colors duration-500 rounded-lg">
       <div className="absolute inset-0 overflow-hidden">
         <div className="relative w-full h-full">
           {/* BackgroundMatrix removed - using Region Nodes now */}
@@ -1223,18 +1223,34 @@ export function PBTGraph({ nodes: initialDataNodes, edges: initialDataEdges, onG
                 <div className="w-full h-px bg-white/10 my-1" />
 
                 <button
-                  onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-                  className="bg-slate-700/50 hover:bg-slate-600 text-white p-2 rounded-full shadow-lg border border-white/10 transition-all"
-                  title={theme === 'dark' ? "Modo Claro (Paciente)" : "Modo Escuro (Clínico)"}
-                >
-                  {theme === 'dark' ? <Sun className="w-5 h-5 text-amber-300" /> : <Moon className="w-5 h-5 text-blue-300" />}
-                </button>
-                <button
                   onClick={() => setMode(mode === 'build' ? 'session' : 'build')}
                   className={`${mode === 'session' ? 'bg-purple-600 hover:bg-purple-500' : 'bg-slate-700/50 hover:bg-slate-600'} text-white p-2 rounded-full shadow-lg border border-white/10 transition-all`}
                   title={mode === 'build' ? "Entrar em Modo Sessão" : "Voltar para Modo Construção"}
                 >
                   {mode === 'build' ? <Monitor className="w-5 h-5" /> : <Wrench className="w-5 h-5" />}
+                </button>
+                <button
+                  onClick={() => {
+                    const elem = document.querySelector('.pbt-graph-container');
+                    if (elem) {
+                      if (document.fullscreenElement) {
+                        document.exitFullscreen();
+                      } else {
+                        elem.requestFullscreen();
+                      }
+                    }
+                  }}
+                  className="bg-slate-700/50 hover:bg-slate-600 text-white p-2 rounded-full shadow-lg border border-white/10 transition-all"
+                  title="Tela Cheia"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>
+                </button>
+                <button
+                  onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+                  className="bg-slate-700/50 hover:bg-slate-600 text-white p-2 rounded-full shadow-lg border border-white/10 transition-all"
+                  title={theme === 'dark' ? "Modo Claro (Paciente)" : "Modo Escuro (Clínico)"}
+                >
+                  {theme === 'dark' ? <Sun className="w-5 h-5 text-amber-300" /> : <Moon className="w-5 h-5 text-blue-300" />}
                 </button>
               </div>
 
