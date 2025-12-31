@@ -39,7 +39,11 @@ import {
   Map,
   HelpCircle,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Sun,
+  Moon,
+  Monitor,
+  Wrench
 } from 'lucide-react';
 import { Connection, addEdge, useReactFlow } from 'reactflow';
 
@@ -49,25 +53,72 @@ interface PBTGraphProps {
   onGraphUpdate?: (nodes: any[], edges: any[]) => void;
 }
 
-// --- CONFIGURAÇÃO VISUAL ---
+// --- CONFIGURAÇÃO VISUAL & TEMAS ---
 
-const CATEGORY_STYLES: Record<string, { color: string; icon: React.ElementType; label: string }> = {
-  'Cognitiva': { color: '#3b82f6', icon: BrainCircuit, label: 'Cognitivo' }, // Blue
-  'Afetiva': { color: '#ef4444', icon: Heart, label: 'Afetivo' }, // Red
-  'Comportamento': { color: '#22c55e', icon: Activity, label: 'Comportamento' }, // Green
-  'Self': { color: '#a855f7', icon: User, label: 'Self' }, // Purple
-  'Contexto': { color: '#eab308', icon: MapPin, label: 'Contexto' }, // Yellow
-  'Motivacional': { color: '#f97316', icon: Zap, label: 'Motivacional' }, // Orange
-  'Sociocultural': { color: '#ec4899', icon: Users, label: 'Sociocultural' }, // Pink
-  'Atencional': { color: '#06b6d4', icon: Eye, label: 'Atencional' }, // Cyan
-  'Biofisiológica': { color: '#14b8a6', icon: Dna, label: 'Biofisiológico' }, // Teal
-  'Intervenção': { color: '#f8fafc', icon: Zap, label: 'INTERVENÇÃO' }, // White/Slate
+const THEME_CONFIG = {
+  dark: {
+    background: '#0f172a', // Slate 900 (Graphite)
+    nodeBg: 'rgba(15, 23, 42, 0.6)',
+    nodeBorder: 'rgba(255, 255, 255, 0.1)',
+    textPrimary: '#f8fafc',
+    textSecondary: '#94a3b8',
+    edge: '#475569',
+    edgeLabelBg: '#1e293b',
+    edgeLabelText: '#94a3b8',
+    categories: {
+      'Cognitiva': '#3b82f6', // Blue
+      'Afetiva': '#ef4444', // Red
+      'Comportamento': '#22c55e', // Green
+      'Self': '#a855f7', // Purple
+      'Contexto': '#eab308', // Yellow
+      'Motivacional': '#f97316', // Orange
+      'Sociocultural': '#ec4899', // Pink
+      'Atencional': '#06b6d4', // Cyan
+      'Biofisiológica': '#14b8a6', // Teal
+      'Intervenção': '#f8fafc', // White/Slate
+    }
+  },
+  light: {
+    background: '#f8fafc', // Slate 50
+    nodeBg: 'rgba(255, 255, 255, 0.8)',
+    nodeBorder: 'rgba(0, 0, 0, 0.1)',
+    textPrimary: '#1e293b',
+    textSecondary: '#64748b',
+    edge: '#94a3b8',
+    edgeLabelBg: '#ffffff',
+    edgeLabelText: '#475569',
+    categories: {
+      'Cognitiva': '#2563eb', // Darker Blue
+      'Afetiva': '#dc2626', // Darker Red
+      'Comportamento': '#16a34a', // Darker Green
+      'Self': '#9333ea', // Darker Purple
+      'Contexto': '#ca8a04', // Darker Yellow
+      'Motivacional': '#ea580c', // Darker Orange
+      'Sociocultural': '#db2777', // Darker Pink
+      'Atencional': '#0891b2', // Darker Cyan
+      'Biofisiológica': '#0d9488', // Darker Teal
+      'Intervenção': '#475569', // Slate 600
+    }
+  }
+};
+
+const CATEGORY_STYLES_BASE: Record<string, { icon: React.ElementType; label: string }> = {
+  'Cognitiva': { icon: BrainCircuit, label: 'Cognitivo' },
+  'Afetiva': { icon: Heart, label: 'Afetivo' },
+  'Comportamento': { icon: Activity, label: 'Comportamento' },
+  'Self': { icon: User, label: 'Self' },
+  'Contexto': { icon: MapPin, label: 'Contexto' },
+  'Motivacional': { icon: Zap, label: 'Motivacional' },
+  'Sociocultural': { icon: Users, label: 'Sociocultural' },
+  'Atencional': { icon: Eye, label: 'Atencional' },
+  'Biofisiológica': { icon: Dna, label: 'Biofisiológico' },
+  'Intervenção': { icon: Zap, label: 'INTERVENÇÃO' },
 };
 
 const DEFAULT_STYLE = { color: '#64748b', icon: BrainCircuit, label: 'Processo' };
 
 // Categories that defaults to Moderators (Rounded)
-const DEFAULT_MODERATOR_CATEGORIES = ['Contexto', 'Sociocultural', 'Biofisiológica'];
+const DEFAULT_MODERATOR_CATEGORIES = ['Contexto', 'Sociocultural', 'Biofisiológica', 'Intervenção'];
 const isModeratorCategory = (cat?: string) => DEFAULT_MODERATOR_CATEGORIES.includes(cat || '');
 
 const CHANGE_ICONS = {
@@ -79,136 +130,160 @@ const CHANGE_ICONS = {
 
 // --- CUSTOM NODE ---
 
-const CustomPBTNode = ({ data }: NodeProps) => {
-  const categoryStyle = CATEGORY_STYLES[data.category] || DEFAULT_STYLE;
-  const StartIcon = categoryStyle.icon;
+
+
+const CustomPBTNode = ({ data, id, selected }: NodeProps) => {
+  const theme = data.theme || 'dark';
+  const mode = data.mode || 'build'; // 'build' | 'session'
+  const isHovered = data.isHovered;
+  const isRelated = data.isRelated;
+  const isContextMode = data.isContextMode; // True if ANY node is hovered/selected
+
+  const colors = THEME_CONFIG[theme as keyof typeof THEME_CONFIG];
+  const categoryBase = CATEGORY_STYLES_BASE[data.category] || { icon: BrainCircuit, label: 'Processo' };
+  const categoryColor = colors.categories[data.category as keyof typeof colors.categories] || colors.categories['Contexto'];
+
+  const StartIcon = categoryBase.icon;
   const isTarget = data.isTarget;
-  // Rule: explicitly flagged OR belongs to moderator category
   const isRounded = data.isModerator || isModeratorCategory(data.category);
   const roundedClass = isRounded ? 'rounded-2xl' : 'rounded-none';
-  const showCategoryBadge = data.showCategoryBadge;
 
-  // AUTO-FIT: Calculate width based on label length
-  // Approximate: ~8px per character, min 100px, max 220px
+  // --- OPACITY & FOCUS LOGIC ---
+  // Default: 1.0
+  // Context Mode (Someone else hovered): 0.4 (40%) default
+  // Related: 1.0 (Full visibility)
+  // Hovered/Selected: 1.0 (Full visibility)
+
+  let opacity = 1;
+  let scale = 1;
+  let zIndex = 0;
+  let boxShadow = 'none';
+  let borderStyle = '1px solid';
+
+  if (isContextMode) {
+    if (isHovered || selected) {
+      opacity = 1;
+      zIndex = 50;
+      // Halo Effect - Visual Anchor
+      boxShadow = `0 0 0 2px ${theme === 'dark' ? '#000' : '#fff'}, 0 0 20px 2px ${categoryColor}60`;
+    } else if (isRelated) {
+      opacity = 0.9;
+      zIndex = 10;
+      boxShadow = `0 0 10px ${categoryColor}20`;
+    } else {
+      opacity = 0.3; // Faded background
+      zIndex = 0;
+    }
+  } else {
+    // Default 'Resting' State
+    if (isTarget) {
+      boxShadow = `0 0 15px ${categoryColor}40`;
+    }
+  }
+
+  // --- TEMPORAL ANCHORING (BORDERS) ---
+  const changeType = data.change || 'estavel';
+  let borderColor = `${categoryColor}40`;
+  let borderWidth = '1px';
+  let borderType = 'solid';
+
+  if (changeType === 'aumentou') {
+    borderWidth = '3px';
+    borderColor = categoryColor; // Strong
+  } else if (changeType === 'diminuiu') {
+    borderWidth = '1px';
+    borderType = 'dashed';
+    borderColor = `${categoryColor}60`;
+  } else if (changeType === 'novo') {
+    borderWidth = '2px';
+    borderColor = '#60a5fa'; // Blue
+  }
+
+
+  // Mode Adjustments
+  const showBadges = mode === 'build'; // Hide extra badges in session mode
+  const fontSize = mode === 'session' ? 'text-sm' : 'text-xs';
+  const padding = mode === 'session' ? 'p-4' : 'p-3';
+
+  // AUTO-FIT
   const labelLength = (data.label || '').length;
-  const calculatedWidth = Math.min(220, Math.max(100, labelLength * 8 + 40));
+  const calculatedWidth = Math.min(240, Math.max(120, labelLength * 9 + (mode === 'session' ? 60 : 40)));
 
   return (
     <div
-      className="relative group"
+      className="relative group transition-all duration-300 ease-out"
       style={{
         width: calculatedWidth,
-        filter: isTarget ? `drop-shadow(0 0 15px #facc15)` : `drop-shadow(0 0 10px ${categoryStyle.color}20)`
+        opacity,
+        transform: `scale(${scale})`,
+        zIndex
       }}
     >
-      <Handle
-        type="source"
-        position={Position.Top}
-        id="top"
-        isConnectable={true}
-        className="!w-[90%] !h-5 !bg-transparent !opacity-100 !-top-1 !border-none !rounded z-50 cursor-crosshair"
-      />
-      <Handle
-        type="target"
-        position={Position.Top}
-        id="top-target"
-        isConnectable={true}
-        className="!w-[90%] !h-5 !bg-transparent !opacity-100 !-top-1 !border-none !rounded z-50 cursor-crosshair"
-        style={{ left: '5%' }}
-      />
-      <Handle
-        type="source"
-        position={Position.Right}
-        id="right"
-        isConnectable={true}
-        className="!w-5 !h-[90%] !bg-transparent !opacity-100 !-right-1 !border-none !rounded z-50 cursor-crosshair"
-      />
-      <Handle
-        type="target"
-        position={Position.Right}
-        id="right-target"
-        isConnectable={true}
-        className="!w-5 !h-[90%] !bg-transparent !opacity-100 !-right-1 !border-none !rounded z-50 cursor-crosshair"
-        style={{ top: '5%' }}
-      />
-      <Handle
-        type="source"
-        position={Position.Left}
-        id="left"
-        isConnectable={true}
-        className="!w-5 !h-[90%] !bg-transparent !opacity-100 !-left-1 !border-none !rounded z-50 cursor-crosshair"
-      />
-      <Handle
-        type="target"
-        position={Position.Left}
-        id="left-target"
-        isConnectable={true}
-        className="!w-5 !h-[90%] !bg-transparent !opacity-100 !-left-1 !border-none !rounded z-50 cursor-crosshair"
-        style={{ top: '5%' }}
-      />
+      {/* Handles - Always present but transparent */}
+      <Handle type="source" position={Position.Top} id="top" className="opacity-0" />
+      <Handle type="target" position={Position.Top} id="top-target" className="opacity-0" style={{ left: '10%' }} />
+      <Handle type="source" position={Position.Right} id="right" className="opacity-0" />
+      <Handle type="target" position={Position.Right} id="right-target" className="opacity-0" style={{ top: '10%' }} />
+      <Handle type="source" position={Position.Bottom} id="bottom" className="opacity-0" />
+      <Handle type="target" position={Position.Bottom} id="bottom-target" className="opacity-0" style={{ left: '10%' }} />
+      <Handle type="source" position={Position.Left} id="left" className="opacity-0" />
+      <Handle type="target" position={Position.Left} id="left-target" className="opacity-0" style={{ top: '10%' }} />
 
-      {/* Category Badge - Shows when region labels are hidden */}
-      {
-        showCategoryBadge && (
-          <div
-            className="absolute -top-6 left-1/2 -translate-x-1/2 z-10 px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider whitespace-nowrap border"
-            style={{
-              backgroundColor: `${categoryStyle.color}20`,
-              borderColor: `${categoryStyle.color}60`,
-              color: categoryStyle.color
-            }}
-          >
-            {categoryStyle.label}
-          </div>
-        )
-      }
+      {/* Category Badge */}
+      {showBadges && !data.hideLabels && (
+        <div
+          className="absolute -top-6 left-1/2 -translate-x-1/2 z-10 px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider whitespace-nowrap border"
+          style={{
+            backgroundColor: `${categoryColor}20`,
+            borderColor: `${categoryColor}60`,
+            color: categoryColor
+          }}
+        >
+          {categoryBase.label}
+        </div>
+      )}
 
-      {/* Target Badge */}
-      {
-        isTarget && (
-          <div className="absolute -top-3 -right-3 z-10 bg-yellow-500 text-slate-900 rounded-full p-1 shadow-lg shadow-yellow-500/20 border border-yellow-300 animate-pulse">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
-              <path fillRule="evenodd" d="M10.788 3.21c.448-1.077 1.976-1.077 2.424 0l2.082 5.007 5.404.433c1.164.093 1.636 1.545.749 2.305l-4.117 3.527 1.257 5.273c.271 1.136-.964 2.033-1.96 1.425L12 18.354 7.373 21.18c-.996.608-2.231-.29-1.96-1.425l1.257-5.273-4.117-3.527c-.887-.76-.415-2.212.749-2.305l5.404-.433 2.082-5.006z" clipRule="evenodd" />
-            </svg>
-          </div>
-        )
-      }
+      {/* Target Star */}
+      {isTarget && (
+        <div className="absolute -top-3 -right-3 z-20 bg-yellow-500 text-slate-900 rounded-full p-1 shadow-lg shadow-yellow-500/20 border border-yellow-300 animate-pulse">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
+            <path fillRule="evenodd" d="M10.788 3.21c.448-1.077 1.976-1.077 2.424 0l2.082 5.007 5.404.433c1.164.093 1.636 1.545.749 2.305l-4.117 3.527 1.257 5.273c.271 1.136-.964 2.033-1.96 1.425L12 18.354 7.373 21.18c-.996.608-2.231-.29-1.96-1.425l1.257-5.273-4.117-3.527c-.887-.76-.415-2.212.749-2.305l5.404-.433 2.082-5.006z" clipRule="evenodd" />
+          </svg>
+        </div>
+      )}
 
-      {/* Corpo do Nó */}
+      {/* Node Body */}
       <div
-        className={`backdrop-blur-md border border-white/10 ${roundedClass} p-3 transition-colors`}
-        style={{ backgroundColor: `${categoryStyle.color}10`, borderColor: `${categoryStyle.color}40` }}
+        className={`backdrop-blur-md ${roundedClass} ${padding} transition-all duration-200`}
+        style={{
+          backgroundColor: `${categoryColor}15`, // Very subtle tint
+          borderWidth: borderWidth,
+          borderStyle: borderType,
+          borderColor: borderColor,
+          boxShadow: boxShadow
+        }}
+        onMouseEnter={data.onNodeHover}
+        onMouseLeave={data.onNodeLeave}
       >
-        <div className="text-xs font-semibold text-white leading-tight mb-2 shadow-black drop-shadow-md">
+        <div className={`${fontSize} font-bold leading-tight mb-2 drop-shadow-sm transition-colors duration-200`} style={{ color: colors.textPrimary }}>
           {data.label}
         </div>
 
-        {/* Footer com Status de Mudança */}
-        <div className="flex items-center justify-between pt-2 border-t border-white/5">
-          <span className="text-[9px] text-slate-400 font-mono">STATUS</span>
-          <div className="flex items-center gap-1.5 bg-black/40 px-2 py-0.5 rounded-full border border-white/10">
-            {CHANGE_ICONS[data.change as keyof typeof CHANGE_ICONS]}
-            <span className="text-[9px] text-slate-300 uppercase tracking-wide">
-              {data.change}
-            </span>
+        {/* Footer (Status) - Visible only in Build Mode or if change is significant */}
+        {(mode === 'build' || changeType !== 'estavel') && (
+          <div className="flex items-center justify-between pt-2 border-t" style={{ borderColor: `${categoryColor}20` }}>
+            {mode === 'build' && <span className="text-[9px] font-mono tracking-wider" style={{ color: colors.textSecondary }}>STATUS</span>}
+            <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full ${changeType === 'aumentou' ? 'bg-black/20' : ''}`}>
+              {CHANGE_ICONS[changeType as keyof typeof CHANGE_ICONS]}
+              {(mode === 'build' || changeType !== 'estavel') && (
+                <span className="text-[9px] uppercase tracking-wide font-medium" style={{ color: colors.textSecondary }}>
+                  {changeType}
+                </span>
+              )}
+            </div>
           </div>
-        </div>
+        )}
       </div>
-      <Handle
-        type="source"
-        position={Position.Bottom}
-        id="bottom"
-        isConnectable={true}
-        className="!w-[90%] !h-5 !bg-transparent !opacity-100 !-bottom-1 !border-none !rounded z-50 cursor-crosshair"
-      />
-      <Handle
-        type="target"
-        position={Position.Bottom}
-        id="bottom-target"
-        isConnectable={true}
-        className="!w-[90%] !h-5 !bg-transparent !opacity-100 !-bottom-1 !border-none !rounded z-50 cursor-crosshair"
-        style={{ left: '5%' }}
-      />
     </div >
   );
 };
@@ -429,15 +504,25 @@ const getRelativePosition = (category: string) => {
 };
 
 export function PBTGraph({ nodes: initialDataNodes, edges: initialDataEdges, onGraphUpdate }: PBTGraphProps) {
+  // --- STATES ---
   const [isEditing, setIsEditing] = React.useState(false);
   const [selectedItem, setSelectedItem] = React.useState<{ type: 'node' | 'edge', data: any } | null>(null);
   const [isModalOpen, setIsModalOpen] = React.useState(false);
-  // Separate state for edit form to decouple from live graph until save
   const [editForm, setEditForm] = React.useState<any>(null);
-  // Toggle region labels visibility
   const [showRegionLabels, setShowRegionLabels] = React.useState(true);
-  // Toggle legend/tutorial visibility
   const [showLegend, setShowLegend] = React.useState(false);
+
+  // New States for Visual Overhaul
+  const [theme, setTheme] = React.useState<'dark' | 'light'>('dark');
+  const [mode, setMode] = React.useState<'build' | 'session'>('build');
+  const [hoveredNodeId, setHoveredNodeId] = React.useState<string | null>(null);
+
+  // Theme Helpers
+  const currentTheme = THEME_CONFIG[theme];
+
+  // Focus Logic
+  const isContextMode = !!hoveredNodeId || !!(selectedItem?.type === 'node');
+  const focusNodeId = hoveredNodeId || (selectedItem?.type === 'node' ? selectedItem.data.id : null);
 
   const { nodes: layoutedNodes, edges: layoutedEdges } = useMemo(() => {
     // ... existing memo logic ...
@@ -450,7 +535,10 @@ export function PBTGraph({ nodes: initialDataNodes, edges: initialDataEdges, onG
         category: n.category,
         change: n.change,
         isTarget: (n as any).isTarget,
-        isModerator: (n as any).isModerator // Load saved property
+        isModerator: (n as any).isModerator,
+        // Helper callbacks
+        onNodeHover: () => setHoveredNodeId(n.id),
+        onNodeLeave: () => setHoveredNodeId(null)
       },
       position: { x: 0, y: 0 },
       type: 'pbtNode',
@@ -459,20 +547,48 @@ export function PBTGraph({ nodes: initialDataNodes, edges: initialDataEdges, onG
     const flowEdges: Edge[] = initialDataEdges.map((e, i) => {
       const isBidirectional = (e as any).bidirectional;
       const weight = (e.weight || 'moderado').toLowerCase();
+      // ... same edge logic ...
       const reverseWeight = ((e as any).reverseWeight || weight).toLowerCase();
-      // Default to 'positive' if not specified
       const polarity = (e as any).polarity || 'positive';
       const reversePolarity = (e as any).reversePolarity || polarity;
 
-      // Arrow head size varies by weight - line is constant
-      // Line is neutral to allow mixed directional weights
-      const strokeWidth = 2;
+      const strokeWidth = 2; // Fixed base width for style
 
-      // Helper para configurar marcador baseado em polaridade e peso
+      // Dynamic Edge Styles based on Focus
+      const isSourceFocused = focusNodeId && e.source === focusNodeId;
+      const isTargetFocused = focusNodeId && e.target === focusNodeId;
+      const isRelated = isSourceFocused || isTargetFocused;
+      const isHovered = false; // Edge hover handled by ReactFlow props usually
+
+      // Visibility Layer Logic
+      // Default (No Focus): Very faint (Ghost) unless weight is 'forte' (Critical)
+      // Focus: 100% opacity if related
+      // Background: 10% opacity
+
+      let opacity = 0.3; // Default 'clean' mode - faint
+      let zIndex = 0;
+      let strokeColor = currentTheme.edge;
+
+      if (isContextMode) {
+        if (isRelated) {
+          opacity = 1;
+          zIndex = 20;
+          strokeColor = isSourceFocused ? currentTheme.textPrimary : currentTheme.textSecondary; // Highlight outgoing stronger
+        } else {
+          opacity = 0.05; // Almost invisible
+        }
+      } else {
+        // Standard View
+        if (weight === 'forte' || (e as any).bidirectional) {
+          opacity = 0.8; // Critical paths visible
+        }
+      }
+
       const getMarkerConfig = (pol: string, w: string) => {
-        let size = 15; // Moderate (Default - 15px)
-        if (w === 'fraco') size = 11; // 11px
-        if (w === 'forte') size = 18; // 18px
+        // ... same marker logic ...
+        let size = 15; // Moderate
+        if (w === 'fraco') size = 11;
+        if (w === 'forte') size = 18;
 
         if (pol === 'negative') {
           const sizeMap: Record<string, string> = {
@@ -484,7 +600,7 @@ export function PBTGraph({ nodes: initialDataNodes, edges: initialDataEdges, onG
         }
         return {
           type: MarkerType.ArrowClosed,
-          color: '#64748b',
+          color: strokeColor, // Dynamic color
           width: size,
           height: size,
         };
@@ -493,23 +609,27 @@ export function PBTGraph({ nodes: initialDataNodes, edges: initialDataEdges, onG
       const markerEnd = getMarkerConfig(polarity, weight);
       const markerStart = isBidirectional ? getMarkerConfig(reversePolarity, reverseWeight) : undefined;
 
+      // Label Logic: Show if focused or specific hover (handled by CSS trigger or state)
+      const showLabel = isRelated;
+
       return {
         id: `e${i}`,
         source: e.source,
         target: e.target,
-        label: e.relation,
+        label: showLabel ? e.relation : '', // Conditional Label
         style: {
-          stroke: '#475569',
+          stroke: strokeColor,
           strokeWidth: strokeWidth,
           strokeDasharray: isBidirectional ? '8, 4' : undefined,
+          opacity: opacity,
+          transition: 'all 0.3s ease'
         },
-        // For bidirectional: remove default animation, we'll use CSS
-        animated: !isBidirectional,
+        animated: false, // Cleaner look
+        zIndex: zIndex,
         className: isBidirectional ? 'react-flow__edge-bidirectional' : '',
-        labelStyle: { fill: '#94a3b8', fontSize: 9, fontWeight: 500 },
-        labelBgStyle: { fill: '#1e293b', fillOpacity: 0.9 },
-        labelBgPadding: [4, 6] as [number, number],
-        labelBgBorderRadius: 4,
+        labelStyle: { fill: currentTheme.edgeLabelText, fontSize: 11, fontWeight: 700 }, // Slightly bigger
+        labelBgStyle: { fill: currentTheme.edgeLabelBg, fillOpacity: 0.9, rx: 4, ry: 4 },
+        labelBgPadding: [6, 4] as [number, number],
         markerEnd: markerEnd,
         markerStart: markerStart,
 
@@ -525,7 +645,7 @@ export function PBTGraph({ nodes: initialDataNodes, edges: initialDataEdges, onG
     });
 
     return getGridLayoutedElements(flowNodes, flowEdges);
-  }, [initialDataNodes, initialDataEdges]);
+  }, [initialDataNodes, initialDataEdges, currentTheme, focusNodeId, isContextMode]);
 
   // HISTORY
   const { state, undo, redo, takeSnapshot, canUndo, canRedo, setInitialState } = useGraphHistory({
@@ -992,18 +1112,41 @@ export function PBTGraph({ nodes: initialDataNodes, edges: initialDataEdges, onG
   }
 
   return (
-    <div style={{ width: '100%', height: '750px' }} className="border border-white/10 rounded-xl overflow-hidden bg-black relative group shadow-inner">
+    <div style={{ width: '100%', height: '750px', backgroundColor: currentTheme.background }} className="border border-white/10 rounded-xl overflow-hidden relative group shadow-inner transition-colors duration-500">
       <div className="absolute inset-0 flex items-center justify-center overflow-hidden">
         <div className="relative w-full h-full max-w-[1200px] max-h-[800px]">
           {/* BackgroundMatrix removed - using Region Nodes now */}
           <div className="absolute inset-0 z-10">
             <ReactFlow
               nodes={nodes.map(n => {
+                // Pass global Visual States to nodes
                 if (n.id.startsWith('region-')) {
-                  return { ...n, data: { ...n.data, hideLabels: !showRegionLabels } };
+                  return { ...n, data: { ...n.data, hideLabels: !showRegionLabels, theme } };
                 }
                 if (n.type === 'pbtNode') {
-                  return { ...n, data: { ...n.data, showCategoryBadge: !showRegionLabels } };
+                  const isHovered = n.id === hoveredNodeId;
+                  const isContextMode = !!hoveredNodeId || !!(selectedItem?.type === 'node');
+                  const focusId = hoveredNodeId || (selectedItem?.type === 'node' ? selectedItem.data.id : null);
+                  // Check if related (edge exists)
+                  const isRelated = edges.some(e =>
+                    (e.source === focusId && e.target === n.id) ||
+                    (e.target === focusId && e.source === n.id)
+                  );
+
+                  return {
+                    ...n,
+                    data: {
+                      ...n.data,
+                      theme,
+                      mode,
+                      isHovered,
+                      isRelated,
+                      isContextMode,
+                      showCategoryBadge: !showRegionLabels,
+                      onNodeHover: () => setHoveredNodeId(n.id),
+                      onNodeLeave: () => setHoveredNodeId(null)
+                    }
+                  };
                 }
                 return n;
               })}
@@ -1038,8 +1181,15 @@ export function PBTGraph({ nodes: initialDataNodes, edges: initialDataEdges, onG
                     <path d="M 0 0 L 10 5 L 0 10 z" fill="white" stroke="#64748b" strokeWidth="1" />
                   </marker>
                   {/* Strong: Large (18px) */}
+                  {/* Colors need to be dynamic for Light Mode, injecting IDs based on theme */}
+                  <marker id="arrow-hollow-fraco" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="11" markerHeight="11" orient="auto-start-reverse">
+                    <path d="M 0 0 L 10 5 L 0 10 z" fill={currentTheme.background} stroke={currentTheme.edge} strokeWidth="1" />
+                  </marker>
+                  <marker id="arrow-hollow-moderado" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="15" markerHeight="15" orient="auto-start-reverse">
+                    <path d="M 0 0 L 10 5 L 0 10 z" fill={currentTheme.background} stroke={currentTheme.edge} strokeWidth="1" />
+                  </marker>
                   <marker id="arrow-hollow-forte" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="18" markerHeight="18" orient="auto-start-reverse">
-                    <path d="M 0 0 L 10 5 L 0 10 z" fill="white" stroke="#64748b" strokeWidth="1" />
+                    <path d="M 0 0 L 10 5 L 0 10 z" fill={currentTheme.background} stroke={currentTheme.edge} strokeWidth="1" />
                   </marker>
                 </defs>
               </svg>
@@ -1062,10 +1212,27 @@ export function PBTGraph({ nodes: initialDataNodes, edges: initialDataEdges, onG
                 </button>
                 <button
                   onClick={() => setShowRegionLabels(!showRegionLabels)}
-                  className={`${showRegionLabels ? 'bg-emerald-700 hover:bg-emerald-600 border-emerald-600' : 'bg-slate-700 hover:bg-slate-600 border-slate-600'} text-white p-2 rounded-full shadow-lg border transition-transform active:scale-95`}
+                  className={`${showRegionLabels ? 'bg-emerald-700/80 hover:bg-emerald-600' : 'bg-slate-700/50 hover:bg-slate-600'} text-white p-2 rounded-full shadow-lg border border-white/10 transition-all`}
                   title={showRegionLabels ? "Esconder Mapa de Regiões" : "Mostrar Mapa de Regiões"}
                 >
                   {showRegionLabels ? <Map className="w-5 h-5" /> : <EyeOff className="w-5 h-5" />}
+                </button>
+
+                <div className="w-full h-px bg-white/10 my-1" />
+
+                <button
+                  onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+                  className="bg-slate-700/50 hover:bg-slate-600 text-white p-2 rounded-full shadow-lg border border-white/10 transition-all"
+                  title={theme === 'dark' ? "Modo Claro (Paciente)" : "Modo Escuro (Clínico)"}
+                >
+                  {theme === 'dark' ? <Sun className="w-5 h-5 text-amber-300" /> : <Moon className="w-5 h-5 text-blue-300" />}
+                </button>
+                <button
+                  onClick={() => setMode(mode === 'build' ? 'session' : 'build')}
+                  className={`${mode === 'session' ? 'bg-purple-600 hover:bg-purple-500' : 'bg-slate-700/50 hover:bg-slate-600'} text-white p-2 rounded-full shadow-lg border border-white/10 transition-all`}
+                  title={mode === 'build' ? "Entrar em Modo Sessão" : "Voltar para Modo Construção"}
+                >
+                  {mode === 'build' ? <Monitor className="w-5 h-5" /> : <Wrench className="w-5 h-5" />}
                 </button>
               </div>
 
